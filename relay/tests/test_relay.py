@@ -297,7 +297,7 @@ class PipeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_explicitly_rejects_unimplemented_real_provider(self):
         with patch.dict("os.environ", {"RELAY_PROVIDER": "real"}):
-            with self.assertRaisesRegex(ValueError, "Only the simulated"):
+            with self.assertRaisesRegex(ValueError, "Unknown RELAY_PROVIDER"):
                 await pipe_module.Pipe().pipe({})
 
 

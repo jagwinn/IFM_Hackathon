@@ -9,5 +9,6 @@
 !integrations/openwebui/horizon_relay_pipe.py
 !deployment/
 !deployment/Dockerfile.relay
+!deployment/Dockerfile.local-model
 **/__pycache__/
 **/*.pyc

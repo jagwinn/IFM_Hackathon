@@ -1,0 +1,15 @@
+services:
+  local-model:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.local-model
+    volumes:
+      - "${LOCAL_MODEL_PATH:?Set LOCAL_MODEL_PATH to the official 0.9B GGUF}:/models/model.gguf:ro"
+    restart: unless-stopped
+  open-webui:
+    depends_on:
+      - local-model
+    environment:
+      RELAY_PROVIDER: live
+      LOCAL_BASE_URL: http://local-model:8080/v1
+      LOCAL_MODEL: IFM/K2-Horizon-0.9B

@@ -1,8 +1,8 @@
 """
-title: Horizon Relay (Simulated Demo)
+title: Horizon Relay
 author: Horizon Relay
-version: 0.1.0
-description: Bounded planner-worker demo using built-in bug reports. No real model calls.
+version: 0.2.0
+description: Local Horizon workers and cloud planning, with a separately labeled simulated demo.
 """
 
 import asyncio
@@ -15,12 +15,23 @@ from horizon_relay.schemas import RelayError
 
 class Pipe:
     def pipes(self):
+        if os.getenv("RELAY_PROVIDER", "simulated") == "live":
+            return [{"id": "live", "name": "Horizon Relay"}, {"id": "demo", "name": "Horizon Relay (Simulated Demo)"}]
         return [{"id": "demo", "name": "Horizon Relay (Simulated Demo)"}]
 
     async def pipe(self, body: dict, __event_emitter__=None, __task__=None,
                    __files__=None, __user__=None, __metadata__=None):
-        if os.getenv("RELAY_PROVIDER", "simulated") != "simulated":
-            raise ValueError("Only the simulated provider is implemented in this milestone")
+        mode = os.getenv("RELAY_PROVIDER", "simulated")
+        if mode not in ("live", "simulated"):
+            raise ValueError("Unknown RELAY_PROVIDER; use live or simulated")
+        if mode == "live" and not body.get("model", "").endswith(".demo"):
+            from horizon_relay.chat import live_chat
+            if __files__ or body.get("files") or (__metadata__ or {}).get("files"):
+                return "Horizon Relay currently supports text only; remove attachments to continue."
+            try:
+                return await live_chat(body, __event_emitter__, __task__)
+            except RelayError as exc:
+                return f"**Relay stopped — no complete answer.** {exc}"
         # UI title/tag requests must not create a plan or spend cloud calls.
         if __task__ is not None:
             async with asyncio.timeout(5):

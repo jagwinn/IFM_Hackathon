@@ -4,7 +4,10 @@ from .schemas import Task, ValidationError
 def validate_result(task: Task, value, inputs: dict):
     if not isinstance(value, dict):
         raise ValidationError("Worker must return an object")
-    if task.result_type == "report_extraction":
+    if task.result_type == "task_answer":
+        if set(value) != {"answer"} or not isinstance(value["answer"], str) or not 1 <= len(value["answer"].strip()) <= 16000:
+            raise ValidationError("Task answer requires nonempty answer text of at most 16000 characters")
+    elif task.result_type == "report_extraction":
         if set(value) != {"report_id", "quote"}:
             raise ValidationError("Extraction requires report_id and quote")
         report_id, quote = value["report_id"], value["quote"]

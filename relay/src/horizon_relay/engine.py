@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import asdict
 import logging
 import time
+import re
 from uuid import uuid4
 
 from .config import Limits
@@ -122,7 +123,12 @@ class _Run:
 
     async def execute(self, goal, sources, accept_local):
         await self.event("local_attempt", "Trying the local model", tier="local")
-        candidate = await self.call("local", "attempt", {"goal": goal, "sources": sources})
+        candidate = await self.call("local", "attempt", {"goal": goal, "sources": sources, "local_extract": accept_local})
+        if (not self.provider.simulated and re.fullmatch(r"\s*(hi|hello|hey|thanks|thank you)[!.\s]*", goal, re.I)
+                and isinstance(candidate, dict) and isinstance(candidate.get("answer"), str)
+                and 0 < len(candidate["answer"].strip()) <= 2000):
+            await self.event("local_accepted", "Simple greeting handled locally", tier="local")
+            return candidate["answer"]
         # Caller opts into a narrowly checkable extraction; confidence never grants acceptance.
         if accept_local and len(sources) == 1:
             local_task = Task("local_answer", goal, "local", tuple(f"sources.{k}" for k in sources),
@@ -170,7 +176,7 @@ class _Run:
                 await asyncio.gather(*jobs, return_exceptions=True)
         await self.event("synthesizing", "Cloud model assembling accepted results", tier="cloud")
         answer = await self.call("cloud", "synthesize", {
-            "goal": goal, "instruction": plan.final_instruction, "results": self.results,
+            "goal": goal, "sources": sources, "instruction": plan.final_instruction, "results": self.results,
         })
         if not isinstance(answer, str) or not answer.strip():
             raise ValidationError("Synthesis returned no answer")
@@ -210,7 +216,8 @@ class _Run:
                 continue
             # Retain accepted work even if a sibling fails later in this batch.
             self.results[task.id] = value
-            await self.event("task_completed", f"{task.id}: checks passed", task_id=task.id,
+            check_label = "output format checked" if task.result_type == "task_answer" else "checks passed"
+            await self.event("task_completed", f"{task.id}: {check_label}", task_id=task.id,
                              tier=tier, attempt=attempt)
             return value
         raise ValidationError(f"Subtask {task.id} failed validation; dependent tasks were not run")

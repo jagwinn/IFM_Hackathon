@@ -4,10 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "horizon-relay"
-version = "0.1.0"
+version = "0.2.0"
 description = "Bounded planner-worker orchestration for Open WebUI"
 requires-python = ">=3.11"
 dependencies = []
+
+[project.optional-dependencies]
+live = ["httpx>=0.28,<1"]
 
 [project.scripts]
 horizon-relay = "horizon_relay.__main__:main"

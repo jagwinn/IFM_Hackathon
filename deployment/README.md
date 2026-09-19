@@ -63,8 +63,8 @@ These require a running Open WebUI instance and are not covered by direct Pipe u
 - Stop during the demo prevents further work and leaves the chat usable.
 - Regenerate starts a new run; simultaneous users do not share run state.
 
-## What is still deferred
+## Real models and remaining work
 
-Real HTTP provider adapters, model downloads, arbitrary text tasks, uploads/RAG, model token streaming, custom task-graph UI, and all-cloud benchmarking. Real model IDs and the cloud API URL are intentionally not guessed.
+Real IFM cloud and local 0.9B model support is now available; see [live model setup](LIVE_MODELS.md). Uploads/RAG, model token streaming, the custom task graph, and all-cloud benchmarking remain deferred. This document describes the separately labeled simulated mode.
 
 Verified locally with Docker Desktop: image build, healthy container on port 3000, Pipe registration, HTTP completion, browser escalation demo, and saved answer/status history after reload. Browser Stop, temporary chats, and multi-user behavior still need dedicated acceptance checks. The engine and Pipe also have direct Python tests.

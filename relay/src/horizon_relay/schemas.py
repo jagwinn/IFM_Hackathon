@@ -16,6 +16,7 @@ class BudgetError(RelayError):
 
 
 CHECKS = {
+    "task_answer": {"required_fields"},
     "report_extraction": {"required_fields", "source_quotes_match"},
     "report_groups": {"required_fields", "report_ids_preserved"},
 }

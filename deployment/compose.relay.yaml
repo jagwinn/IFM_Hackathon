@@ -7,8 +7,13 @@ services:
       - "127.0.0.1:3000:8080"
     environment:
       WEBUI_SECRET_KEY: "${WEBUI_SECRET_KEY:?Set WEBUI_SECRET_KEY in .env}"
-      RELAY_PROVIDER: simulated
-      CLOUD_ENABLED: "true"
+      RELAY_PROVIDER: "${RELAY_PROVIDER:-simulated}"
+      CLOUD_BASE_URL: "${CLOUD_BASE_URL:-https://api.ifm.ai/v1}"
+      CLOUD_MODEL: "${CLOUD_MODEL:-IFM/K2-Horizon-375B-A23B}"
+      CLOUD_API_KEY: "${CLOUD_API_KEY:-}"
+      LOCAL_BASE_URL: "${LOCAL_BASE_URL:-http://model-runner.docker.internal/engines/v1}"
+      LOCAL_MODEL: "${LOCAL_MODEL:-hf.co/IFM/K2-Horizon-0.9B-GGUF:BF16}"
+      CLOUD_ENABLED: "${CLOUD_ENABLED:-true}"
       ENABLE_PLUGINS: "true"
       WEBUI_AUTH: "${WEBUI_AUTH:-true}"
       OFFLINE_MODE: "true"

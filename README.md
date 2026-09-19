@@ -15,7 +15,7 @@ Read the [integration plan](INTEGRATION_PLAN.md) for the proposed Pipe integrati
 
 ## Status
 
-Implemented: a runnable **simulated** local → cloud planner → local workers → synthesis lifecycle, graph and evidence validation, bounded repair/escalation, cancellation, per-run metrics, and Open WebUI status events.
+Implemented: real local Horizon 0.9B workers and IFM 375B cloud planning, plus a separately labeled simulated provider. Both use graph validation, bounded repair/escalation, cancellation, per-run metrics, and Open WebUI status events. See [live model setup](deployment/LIVE_MODELS.md).
 
 From the repository root, with Python 3.11+:
 
@@ -26,7 +26,7 @@ PYTHONPATH=relay/src python3 -m unittest discover -s relay/tests -v
 
 The demo uses built-in bug reports and scripted responses; no real model calls or API keys are involved. Open WebUI's existing frontend is unchanged. Docker startup, the browser escalation demo, and saved chat reload have been verified locally. Browser Stop and multi-user behavior still need dedicated acceptance checks.
 
-Next: run the [Open WebUI setup](deployment/README.md), then implement the real local/cloud provider adapters after confirming the endpoints and model IDs.
+For real conversations select **Horizon Relay**. Simple greetings and exactly validated extraction may stay local; other requests use cloud planning and synthesis. Generic worker answers are checked for output format, not proven factually correct. Real cloud calls use your configured API key; secrets remain outside Git and Docker images.
 
 ## Upstream notices
 
