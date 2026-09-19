@@ -7,16 +7,16 @@ This milestone makes **no model API calls**. It exercises the real scheduling, c
 From the repository root, with Python 3.11 or newer:
 
 ```sh
-PYTHONPATH=relay/src python3 -m horizon_relay --scenario standard --events
-PYTHONPATH=relay/src python3 -m horizon_relay --scenario local --no-cloud
-PYTHONPATH=relay/src python3 -m horizon_relay --scenario repair --events
-PYTHONPATH=relay/src python3 -m horizon_relay --scenario escalate --events
+PYTHONPATH=relay/src python3 -m horizon_relay demo --scenario standard --events
+PYTHONPATH=relay/src python3 -m horizon_relay demo --scenario local --no-cloud
+PYTHONPATH=relay/src python3 -m horizon_relay demo --scenario repair --events
+PYTHONPATH=relay/src python3 -m horizon_relay demo --scenario escalate --events
 PYTHONPATH=relay/src python3 -m unittest discover -s relay/tests -v
 ```
 
 No installation or third-party Python libraries are needed for those commands. Status events go to stderr as JSONL; the answer and measured orchestration timings go to stdout. Token counts remain unknown because no model generated tokens.
 
-Alternatively install with `python3 -m pip install -e ./relay`, then run `horizon-relay --events`.
+Alternatively install with `python3 -m pip install -e ./relay`, then run `horizon-relay demo --events`. Add `--json` for the full result with metrics.
 
 ## Run inside Open WebUI
 
@@ -30,7 +30,7 @@ Requires a working Docker installation. The container supplies Open WebUI's supp
    ```
 
 3. Open <http://localhost:3000> and create the initial administrator account.
-4. In the admin **Functions** editor, create a Function with ID `horizon_relay` and paste the contents of `integrations/openwebui/horizon_relay_pipe.py`. Save and enable it. The derived image already installs the Python package the Pipe imports.
+4. Nothing to paste: on every start the container installs or updates the `horizon_relay` Function from `integrations/openwebui/horizon_relay_pipe.py` and enables it. Changes made in the admin **Functions** editor are replaced on restart; edit the file and rebuild instead.
 5. Select **Horizon Relay (Simulated Demo)** in a new chat. Send one of the commands below as the entire message.
 
 | Message | Expected behavior |

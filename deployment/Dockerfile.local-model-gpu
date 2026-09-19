@@ -1,18 +1,20 @@
-FROM debian:bookworm-slim AS build
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential cmake curl ca-certificates && rm -rf /var/lib/apt/lists/*
 ARG LLAMA_COMMIT=42adf019f76013dac873b5b43950d54d5ab27216
 RUN curl -fsSL "https://github.com/MBZUAI-IFM/llama.cpp/archive/${LLAMA_COMMIT}.tar.gz" -o /tmp/llama.tar.gz \
     && mkdir /src && tar -xzf /tmp/llama.tar.gz --strip-components=1 -C /src
+# Compute capability of the target GPU (RTX 3070 = 86). Each extra architecture multiplies compile time;
+# pass a list like "75;86;89" to support more cards.
+ARG CUDA_ARCHS=86
 RUN cmake -S /src -B /src/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
-    -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_METAL=OFF -DLLAMA_CURL=OFF \
-    && cmake --build /src/build --target llama-server -j 4
-RUN cmake --build /src/build --target llama-quantize -j 4
+    -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHS}" -DLLAMA_CURL=OFF \
+    && cmake --build /src/build --target llama-server llama-quantize -j "$(nproc)"
 
-FROM debian:bookworm-slim
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/build/bin/llama-server /usr/local/bin/llama-server
 COPY --from=build /src/build/bin/llama-quantize /usr/local/bin/llama-quantize
 # Publishes the hardware the model runs on at /device.json for the relay, then starts llama-server.
 COPY deployment/serve-model.sh /usr/local/bin/serve-model
 ENTRYPOINT ["serve-model"]
-CMD ["--model", "/models/model.gguf", "--host", "0.0.0.0", "--port", "8080", "--ctx-size", "8192", "--parallel", "1", "--threads", "4", "--alias", "IFM/K2-Horizon-0.9B"]
+CMD ["--model", "/models/model.gguf", "--host", "0.0.0.0", "--port", "8080", "--ctx-size", "8192", "--parallel", "1", "--threads", "4", "--n-gpu-layers", "999", "--alias", "IFM/K2-Horizon-0.9B"]

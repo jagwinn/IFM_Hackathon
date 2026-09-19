@@ -1,18 +1,10 @@
 import asyncio
 from dataclasses import replace
-import importlib.util
-from pathlib import Path
 import unittest
-from unittest.mock import patch
 
-from horizon_relay import Limits, RelayEngine, SimulatedProvider
-from horizon_relay.providers import demo_sources
-from horizon_relay.schemas import BudgetError, Plan, RelayError, Reply, ValidationError
-
-PIPE_FILE = Path(__file__).resolve().parents[2] / "integrations/openwebui/horizon_relay_pipe.py"
-spec = importlib.util.spec_from_file_location("relay_pipe", PIPE_FILE)
-pipe_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(pipe_module)
+from horizon_relay import BudgetError, Limits, RelayEngine, RelayError, Reply, SimulatedProvider, ValidationError
+from horizon_relay.plan import Plan
+from horizon_relay.providers.simulated import demo_sources
 
 
 class RelayTests(unittest.IsolatedAsyncioTestCase):
@@ -25,7 +17,7 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
             sources = {"report_1": sources["report_1"]}
         result = await RelayEngine(provider or SimulatedProvider(scenario), limits).run(
             "Extract report verbatim" if scenario == "local" else "Prioritize bug reports",
-            sources, accept_local=scenario == "local", emit=emit,
+            sources, local_extract=scenario == "local", emit=emit,
         )
         return result, events
 
@@ -35,10 +27,10 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metrics["local_calls"], 4)
         self.assertEqual(len(result.results), 3)
         self.assertIn("SIMULATED", result.content)
-        completed = [e["data"]["relay"].get("task_id") for e in events if e["data"]["relay"]["event"] == "task_completed"]
+        completed = [e.data.get("task_id") for e in events if e.name == "task_completed"]
         self.assertEqual(completed[-1], "group_reports")
-        self.assertEqual([e["data"]["relay"]["seq"] for e in events], list(range(1, len(events) + 1)))
-        self.assertTrue(events[-1]["data"]["done"])
+        self.assertEqual([e.seq for e in events], list(range(1, len(events) + 1)))
+        self.assertTrue(events[-1].done)
         self.assertTrue(all(c["prompt_tokens"] is None for c in result.metrics["calls"]))
 
     async def test_local_needs_no_cloud(self):
@@ -59,10 +51,10 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         result, events = await self.run_demo("repair")
         self.assertEqual(result.metrics["cloud_calls"], 2)
         self.assertEqual(result.metrics["local_calls"], 5)
-        names = [e["data"]["relay"]["event"] for e in events]
+        names = [e.name for e in events]
         self.assertIn("task_invalid", names)
         self.assertNotIn("task_escalated", names)
-        self.assertIn("fault_injection", names)
+        self.assertIn("provider_notice", names)
 
     async def test_partial_quote_cannot_satisfy_verbatim_local_request(self):
         class PartialQuote(SimulatedProvider):
@@ -84,12 +76,11 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
                 return await super().complete(tier, operation, payload)
         async def emit(event):
             events.append(event)
-            data = event["data"]["relay"]
-            if data["event"] == "task_completed" and data["task_id"] == "extract_report_2":
+            if event.name == "task_completed" and event.data["task_id"] == "extract_report_2":
                 accepted.set()
         with self.assertRaises(RelayError):
             await RelayEngine(FailedSibling(), Limits(local_concurrency=2)).run("Goal", demo_sources(), emit=emit)
-        self.assertIn("extract_report_2", events[-1]["data"]["relay"]["metrics"]["completed_tasks"])
+        self.assertIn("extract_report_2", events[-1].data["metrics"]["completed_tasks"])
 
     async def test_only_failed_task_escalates(self):
         result, _ = await self.run_demo("escalate")
@@ -100,6 +91,17 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
     async def test_budget_reserves_synthesis(self):
         with self.assertRaises(BudgetError):
             await self.run_demo("escalate", Limits(cloud_calls=2))
+
+    async def test_failed_worker_call_escalates_instead_of_stopping(self):
+        class Truncating(SimulatedProvider):
+            async def complete(self, tier, operation, payload):
+                if operation == "work" and tier == "local" and payload["task"]["id"] == "extract_report_1":
+                    raise RelayError("Local response was empty or reached its token limit")
+                return await super().complete(tier, operation, payload)
+        result, events = await self.run_demo(provider=Truncating())
+        cloud_work = [c["task_id"] for c in result.metrics["calls"] if c["tier"] == "cloud" and c["operation"] == "work"]
+        self.assertEqual(cloud_work, ["extract_report_1"])
+        self.assertIn("token limit", [e.data.get("error", "") for e in events if e.name == "task_invalid"][0])
 
     async def test_cloud_worker_budget(self):
         with self.assertRaises(BudgetError):
@@ -113,7 +115,8 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         operations = []
         class AlwaysInvalid(SimulatedProvider):
             async def complete(self, tier, operation, payload):
-                operations.append((operation, payload.get("task", {}).get("id")))
+                task = payload.get("task")
+                operations.append((operation, task.get("id") if isinstance(task, dict) else None))
                 if operation == "work" and payload["task"]["id"] == "extract_report_1":
                     return Reply({}, "fake")
                 return await super().complete(tier, operation, payload)
@@ -132,7 +135,7 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
                 return await super().complete(tier, operation, payload)
         with self.assertRaises(ValidationError):
             await self.run_demo(provider=BadPlanner())
-        self.assertEqual(calls, ["attempt", "plan", "plan"])
+        self.assertEqual(calls, ["solve", "plan", "plan"])
 
     async def test_plan_repair_recovers(self):
         class RepairPlanner(SimulatedProvider):
@@ -192,7 +195,7 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0)
         self.assertEqual(len(calls), count)
         self.assertNotIn("synthesize", calls)
-        self.assertEqual(events[-1]["data"]["relay"]["event"], "run_cancelled")
+        self.assertEqual(events[-1].name, "run_cancelled")
 
     async def test_timeout_closes_provider(self):
         with self.assertRaises(RelayError):
@@ -222,11 +225,12 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
             nonlocal saved
             snapshot = list(saved)
             await asyncio.sleep(0.001)
-            saved = snapshot + [event["data"]["relay"]["seq"]]
+            saved = snapshot + [event.seq]
         await RelayEngine(SimulatedProvider("escalate"), Limits(local_concurrency=2)).run(
             "Goal", demo_sources(), emit=read_append_write,
         )
-        self.assertEqual(saved, list(range(1, 19)))
+        self.assertGreater(len(saved), 18)
+        self.assertEqual(saved, list(range(1, len(saved) + 1)))
 
     async def test_plan_validation(self):
         provider = SimulatedProvider()
@@ -258,47 +262,6 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
                 return reply
         with self.assertRaises(ValidationError):
             await self.run_demo(provider=BadGroup())
-
-
-class PipeTests(unittest.IsolatedAsyncioTestCase):
-    async def test_model_registered(self):
-        self.assertEqual(pipe_module.Pipe().pipes()[0]["id"], "demo")
-
-    async def test_streaming_and_nonstreaming_return_content_without_emitter(self):
-        for stream in (False, True):
-            result = await pipe_module.Pipe().pipe({"stream": stream, "messages": [{"role": "user", "content": "/relay-demo local"}]})
-            self.assertIn("SIMULATED", result)
-            self.assertIn("0 cloud", result)
-
-    async def test_background_bypasses_engine(self):
-        with patch.object(pipe_module.RelayEngine, "run", side_effect=AssertionError("Must not run")):
-            result = await pipe_module.Pipe().pipe({}, __task__="title_generation")
-        self.assertIn('"title"', result)
-
-    async def test_progress_is_status_only(self):
-        events = []
-        async def emit(event):
-            events.append(event)
-        result = await pipe_module.Pipe().pipe({"messages": [{"role": "user", "content": "/relay-demo"}]}, __event_emitter__=emit)
-        self.assertIn("Engineering plan", result)
-        self.assertTrue(events)
-        self.assertTrue(all(e["type"] == "status" for e in events))
-
-    async def test_does_not_answer_arbitrary_prompts_with_fixture(self):
-        result = await pipe_module.Pipe().pipe({"messages": [{"role": "user", "content": "What is my budget?"}]})
-        self.assertIn("/relay-demo", result)
-        self.assertNotIn("Engineering plan", result)
-
-    async def test_rejects_attachments_and_multimodal(self):
-        result = await pipe_module.Pipe().pipe({"messages": []}, __files__=[{"id": "file"}])
-        self.assertIn("remove attachments", result)
-        result = await pipe_module.Pipe().pipe({"messages": [{"role": "user", "content": [{"type": "image_url"}]}]})
-        self.assertIn("text messages only", result)
-
-    async def test_explicitly_rejects_unimplemented_real_provider(self):
-        with patch.dict("os.environ", {"RELAY_PROVIDER": "real"}):
-            with self.assertRaisesRegex(ValueError, "Unknown RELAY_PROVIDER"):
-                await pipe_module.Pipe().pipe({})
 
 
 if __name__ == "__main__":

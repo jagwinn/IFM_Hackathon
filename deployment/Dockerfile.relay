@@ -1,4 +1,6 @@
 FROM ghcr.io/open-webui/open-webui:v0.11.3
 COPY relay /opt/horizon-relay
 RUN python -m pip install --no-cache-dir --no-deps /opt/horizon-relay
-COPY integrations/openwebui/horizon_relay_pipe.py /opt/horizon-relay/horizon_relay_pipe.py
+COPY integrations/openwebui/horizon_relay_pipe.py integrations/openwebui/sync_pipe.py /opt/horizon-relay/
+# Install or update the Pipe from this image on every start, then run Open WebUI's normal entry point.
+CMD ["bash", "-c", "PYTHONPATH=/app/backend python /opt/horizon-relay/sync_pipe.py || echo 'horizon-relay: Pipe sync failed; starting without it' >&2; exec bash start.sh"]

@@ -16,3 +16,6 @@ node_modules/
 /work/
 /relay/build/
 *.egg-info/
+
+# Local GGUF weights
+deployment/models/

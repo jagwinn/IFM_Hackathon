@@ -1,0 +1,30 @@
+services:
+  local-model:
+    environment:
+      RELAY_GPU_INDEXES: "${LOCAL_MODEL_GPU:-0}"  # reported to the relay; keep equal to device_ids below
+    build:
+      dockerfile: deployment/Dockerfile.local-model-gpu
+      args:
+        CUDA_ARCHS: "${CUDA_ARCHS:-86}"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${LOCAL_MODEL_GPU:-0}"]  # host GPU index; see nvidia-smi -L
+              capabilities: [gpu]
+  local-model-4b:
+    environment:
+      RELAY_GPU_INDEXES: "${MID_MODEL_GPU:-0}"  # reported to the relay; keep equal to device_ids below
+    build:
+      dockerfile: deployment/Dockerfile.local-model-gpu
+      args:
+        CUDA_ARCHS: "${CUDA_ARCHS:-86}"
+    command: ["--model", "/models/model.gguf", "--host", "0.0.0.0", "--port", "8080", "--ctx-size", "8192", "--parallel", "1", "--threads", "4", "--n-gpu-layers", "999", "--alias", "IFM/K2-Horizon-4B"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${MID_MODEL_GPU:-0}"]
+              capabilities: [gpu]

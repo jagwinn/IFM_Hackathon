@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relay decision graph</title>
+<!-- Standalone renderer for a horizon_relay RunGraph (graph.py). No network requests. -->
+<style>
+:root {
+  --surface: #ffffff; --surface-2: #f4f4f5; --line: #e4e4e7; --line-strong: #cfcfd4;
+  --text: #18181b; --muted: #62626b; --faint: #9a9aa3;
+  --cloud: #6a4bd1; --mid: #2461c7; --local: #0b8574; --esc: #bd560b; --fail: #c4352c; --focus: #18181b;
+  --sans: -apple-system, BlinkMacSystemFont, Inter, "Segoe UI", Roboto, system-ui, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #1c1c1f; --surface-2: #26262a; --line: #313136; --line-strong: #45454c;
+    --text: #ececef; --muted: #a3a3ac; --faint: #75757e;
+    --cloud: #a58dff; --mid: #7ba8f8; --local: #44c8af; --esc: #f39a4c; --fail: #f27b71; --focus: #ececef;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: transparent; }
+body { color: var(--text); font: 13px/1.45 var(--sans); padding: 1px; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.mono { font-family: var(--mono); }
+
+.rg { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 9px 10px 9px 14px; }
+.name { font-weight: 600; }
+.route { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; flex: 1 1 320px; min-width: 0; }
+.chip { font-size: 11.5px; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--line); white-space: nowrap; display: inline-flex; gap: 5px; align-items: center; color: var(--c, var(--text)); border-color: color-mix(in srgb, var(--c, var(--line-strong)) 38%, transparent); }
+.chip .mono { font-size: 10.5px; }
+.sep { color: var(--faint); font-size: 11px; }
+.stats { font: 12px var(--mono); color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.badge { font: 600 10px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--esc); border: 1px solid color-mix(in srgb, var(--esc) 45%, transparent); border-radius: 4px; padding: 1px 5px; }
+.actions { display: flex; gap: 6px; }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 3px 10px; font-size: 12.5px; cursor: pointer; }
+.btn:hover { background: var(--surface-2); }
+.hiddenbar { display: flex; gap: 10px; align-items: center; font-size: 12.5px; color: var(--muted); padding: 2px 4px; }
+.link { background: none; border: 0; padding: 0; color: var(--text); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; font-size: 12.5px; }
+
+.body { border-top: 1px solid var(--line); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding: 8px 14px; font-size: 12px; color: var(--muted); }
+.legend .lbl { color: var(--faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; }
+.toggle { display: inline-flex; align-items: center; gap: 7px; background: none; border: 1px solid transparent; border-radius: 6px; padding: 2px 6px; cursor: pointer; font-size: 12px; }
+.toggle[aria-pressed="false"] { color: var(--faint); text-decoration: line-through; }
+.legend .hint { margin-left: auto; color: var(--faint); }
+.scroll { overflow-x: auto; overscroll-behavior-x: contain; border-top: 1px solid var(--line); }
+.canvas { position: relative; }
+.lane { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line); }
+.lane:first-of-type { border-top: 0; }
+.lane::before { content: ""; position: absolute; inset: 0; background: var(--lc); opacity: .05; }
+.lanelabel { position: absolute; left: 26px; top: 30px; width: 108px; display: grid; gap: 1px; }
+.lanelabel .m { font: 500 12px var(--mono); color: var(--lc); }
+.lanelabel .w { font-size: 11.5px; color: var(--muted); }
+.lanelabel .s { font: 10px var(--mono); color: var(--faint); overflow-wrap: anywhere; }
+.axis { position: absolute; left: 5px; font-size: 9.5px; color: var(--faint); writing-mode: vertical-rl; transform: rotate(180deg); letter-spacing: .06em; text-transform: uppercase; text-align: center; }
+.colhead { position: absolute; top: 7px; font-size: 10.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; text-align: center; white-space: nowrap; }
+svg.edges { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.edge { fill: none; stroke-width: 1.6; }
+.edge.delegated, .edge.assigned { stroke: var(--ec); }
+.edge.escalated { stroke: var(--esc); stroke-width: 1.8; stroke-dasharray: 5 4; }
+.edge.result { stroke: var(--line-strong); stroke-width: 1.4; }
+.elabel { position: absolute; transform: translate(0, -50%); font-size: 11px; white-space: nowrap; background: var(--surface); border-radius: 999px; padding: 0 7px; border: 1px solid var(--line); pointer-events: none; }
+.elabel.escalated { color: var(--esc); border-color: color-mix(in srgb, var(--esc) 45%, transparent); }
+.elabel.delegated { color: var(--ec); border-color: color-mix(in srgb, var(--ec) 40%, transparent); }
+
+.node { position: absolute; text-align: left; border: 1px solid var(--line-strong); background: var(--surface); border-radius: 10px; padding: 7px 10px; display: grid; grid-template-rows: auto 1fr auto; gap: 1px; cursor: pointer; transition: opacity .15s, box-shadow .15s; }
+.node:hover { border-color: var(--lc); }
+.node.sel { box-shadow: 0 0 0 2px var(--lc); border-color: var(--lc); }
+.node.st-escalated { border-style: dashed; border-color: color-mix(in srgb, var(--esc) 70%, transparent); }
+.node.st-failed, .node.st-stopped { border-color: color-mix(in srgb, var(--fail) 60%, transparent); }
+.node.st-queued, .node.st-skipped { opacity: .6; border-style: dashed; }
+.ntop { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.tag { font: 500 10.5px var(--mono); color: var(--lc); border: 1px solid color-mix(in srgb, var(--lc) 40%, transparent); border-radius: 4px; padding: 0 4px; }
+.ntitle { font-weight: 600; font-size: 13px; line-height: 1.2; align-self: center; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.nfoot { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.pips { display: inline-flex; gap: 2px; }
+.pip { width: 14px; height: 14px; border-radius: 3px; display: grid; place-items: center; font-size: 9.5px; font-weight: 700; border: 1px solid var(--line-strong); }
+.pip.failed, .pip.error, .pip.stopped { background: color-mix(in srgb, var(--fail) 14%, transparent); border-color: color-mix(in srgb, var(--fail) 55%, transparent); color: var(--fail); }
+.pip.running { border-color: var(--lc); animation: pulse 1s ease-in-out infinite; }
+.stesc { color: var(--esc); font-weight: 500; }
+.stfail { color: var(--fail); font-weight: 500; }
+.conf { margin-left: auto; display: inline-flex; gap: 2px; align-items: center; }
+.conf i { width: 3px; height: 9px; border-radius: 1px; background: var(--line-strong); display: block; }
+.conf.medium i:nth-child(-n+2), .conf.high i { background: var(--muted); }
+.conf.low { color: var(--esc); }
+.conf.low i:nth-child(1) { background: var(--esc); }
+@keyframes pulse { 50% { opacity: .35; } }
+.rg.hovering .edge:not(.lit), .rg.hovering .elabel:not(.lit) { opacity: .15; }
+.rg.hovering .node:not(.lit) { opacity: .45; }
+
+.detail { border-top: 1px solid var(--line); padding: 14px; display: grid; gap: 12px; }
+.dhead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.dhead h3 { margin: 0; font-size: 15px; }
+.pill { font-size: 11.5px; border-radius: 999px; padding: 0 8px; border: 1px solid var(--line); }
+.pill.escalated { color: var(--esc); border-color: color-mix(in srgb, var(--esc) 45%, transparent); }
+.pill.failed, .pill.stopped { color: var(--fail); border-color: color-mix(in srgb, var(--fail) 45%, transparent); }
+.task { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 6px; }
+.task .tlabel { font-size: 10.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .07em; font-weight: 600; display: flex; gap: 6px; align-items: center; }
+.task .ttext { margin: 0; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+.task .tmeta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); align-items: center; }
+.task .tmeta .chip { color: var(--text); }
+.subtasks { display: grid; gap: 6px; }
+.subtask { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; display: grid; gap: 2px; }
+.subtask .st { display: flex; gap: 6px; align-items: center; font-weight: 600; }
+.dgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px 26px; }
+.dcol { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.sec { display: grid; gap: 4px; }
+.sec h4 { margin: 0; font-size: 10.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .07em; font-weight: 600; }
+.sec p { margin: 0; }
+.by { font-size: 12px; color: var(--muted); }
+.muted { color: var(--muted); }
+.meter { display: flex; align-items: center; gap: 10px; }
+.meter .bars { display: flex; gap: 3px; }
+.meter .bars i { width: 22px; height: 6px; border-radius: 2px; background: var(--line); display: block; }
+.meter.low .bars i:nth-child(1) { background: var(--esc); }
+.meter.medium .bars i:nth-child(-n+2), .meter.high .bars i { background: var(--muted); }
+.meter .lv { font-weight: 600; }
+.meter.low .lv { color: var(--esc); }
+.caveat { font-size: 11.5px; color: var(--faint); }
+.attempts { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.att { display: grid; grid-template-columns: auto 1fr; gap: 1px 10px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.att .n { grid-row: span 4; font: 500 11px var(--mono); color: var(--faint); padding-top: 2px; }
+.att .h { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-weight: 600; }
+.att.failed, .att.error, .att.stopped { border-color: color-mix(in srgb, var(--fail) 40%, var(--line)); }
+.att.failed .o, .att.error .o, .att.stopped .o { color: var(--fail); }
+.att .chk { font: 12px var(--mono); color: var(--fail); overflow-wrap: anywhere; }
+.att .jd { font-size: 12px; color: var(--muted); }
+.att .mt { font: 11px var(--mono); color: var(--faint); font-variant-numeric: tabular-nums; }
+.score { display: grid; gap: 6px; }
+.scorebar { position: relative; height: 10px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--line); }
+.scorebar .fill { position: absolute; inset: 0 auto 0 0; border-radius: 5px; background: var(--muted); }
+.scorebar .fill.over { background: var(--esc); }
+.scorebar .thr { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--text); }
+.scoreline { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-variant-numeric: tabular-nums; }
+.scoreline b { font-size: 15px; }
+.signals { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.signals th { text-align: left; font-weight: 600; color: var(--faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; padding: 3px 6px 3px 0; }
+.signals td { padding: 3px 6px 3px 0; border-top: 1px solid var(--line); vertical-align: middle; }
+.signals td.num { text-align: right; font-family: var(--mono); white-space: nowrap; }
+.tip { position: relative; display: inline-flex; align-items: center; gap: 4px; cursor: help; border-radius: 4px; }
+.tip .i { font-size: 10px; color: var(--faint); }
+.tip:hover .i, .tip:focus .i { color: var(--text); }
+.tipbox { display: none; position: absolute; left: 0; top: calc(100% + 6px); z-index: 5; width: min(320px, 80vw);
+  background: var(--surface); color: var(--text); border: 1px solid var(--line-strong); border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.18); padding: 9px 11px; font: 12px/1.45 var(--sans); white-space: normal; text-transform: none; letter-spacing: 0; }
+.tipbox b { display: block; margin-bottom: 3px; }
+.tipbox .how { display: block; margin-top: 5px; color: var(--muted); }
+.tip:hover .tipbox, .tip:focus .tipbox, .tip:focus-within .tipbox { display: block; }
+.sbar { display: block; width: 80px; height: 6px; border-radius: 3px; background: var(--surface-2); position: relative; overflow: hidden; }
+.sbar i { position: absolute; inset: 0 auto 0 0; background: var(--muted); display: block; }
+.samples { display: grid; gap: 6px; }
+.tokstrip { font: 12px/1.9 var(--mono); overflow-wrap: anywhere; white-space: pre-wrap; }
+.tokstrip span { border-radius: 3px; padding: 1px 0; background: color-mix(in srgb, var(--esc) var(--u), transparent); cursor: help; }
+.toklegend { font-size: 11px; color: var(--faint); }
+.sample { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; display: grid; gap: 3px; }
+.sample .meta { font: 11px var(--mono); color: var(--faint); }
+.result { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
+.result ul { margin: 0; padding-left: 18px; white-space: normal; }
+@media (prefers-reduced-motion: reduce) { .pip.running { animation: none; } .node { transition: none; } }
+</style>
+</head>
+<body>
+<div class="rg" id="rg">
+  <div class="hiddenbar" id="hiddenBar" hidden><span>Relay graph hidden</span><button class="link" id="show" type="button">Show</button></div>
+  <div id="main">
+    <div class="bar">
+      <span class="name">Relay route</span>
+      <div class="route" id="route"></div>
+      <span class="stats" id="stats"></span>
+      <div class="actions">
+        <button class="btn" id="toggle" type="button" aria-expanded="true" aria-controls="body">Collapse</button>
+        <button class="btn" id="hide" type="button">Hide</button>
+      </div>
+    </div>
+    <div class="body" id="body">
+      <div class="legend">
+        <span class="lbl">Show</span>
+        <button class="toggle" type="button" data-edge="delegated" aria-pressed="true"><svg width="26" height="10" aria-hidden="true"><line x1="1" y1="5" x2="20" y2="5" stroke="var(--local)" stroke-width="1.6"/><path d="M19 1.5 L25 5 L19 8.5 Z" fill="var(--local)"/></svg>Delegated down to a smaller model</button>
+        <button class="toggle" type="button" data-edge="escalated" aria-pressed="true"><svg width="26" height="10" aria-hidden="true"><line x1="1" y1="5" x2="20" y2="5" stroke="var(--esc)" stroke-width="1.8" stroke-dasharray="5 4"/><path d="M19 1.5 L25 5 L19 8.5 Z" fill="var(--esc)"/></svg>Escalated up to a larger model</button>
+        <button class="toggle" type="button" data-edge="result" aria-pressed="true"><svg width="26" height="10" aria-hidden="true"><line x1="1" y1="5" x2="20" y2="5" stroke="var(--line-strong)" stroke-width="1.4"/><path d="M19 1.5 L25 5 L19 8.5 Z" fill="var(--line-strong)"/></svg>Checked result passed on</button>
+        <span class="hint">Select a step for details</span>
+      </div>
+      <div class="scroll"><div class="canvas" id="canvas"></div></div>
+      <section class="detail" id="detail" aria-live="polite"></section>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  const G = /*RELAY_GRAPH*/null;
+  if (!G) return;
+
+  const TIER_COLOR = { local: "var(--local)", mid: "var(--mid)", cloud: "var(--cloud)" };
+  const TIER_LABEL = { local: "Small", mid: "Mid", cloud: "Large" };
+  const lanes = [...G.lanes].reverse();  // largest model on top
+  const laneIdx = Object.fromEntries(lanes.map((l, i) => [l.id, i]));
+  const shortName = id => {
+    const lane = G.lanes.find(l => l.id === id);
+    const m = lane && /(\d+(?:\.\d+)?B)/i.exec(lane.model);
+    return m ? m[1] : TIER_LABEL[id] || id;
+  };
+  const color = id => TIER_COLOR[id] || "var(--muted)";
+  const nodes = G.nodes.filter(n => n.lane in laneIdx);
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const edges = G.edges.filter(e => byId[e.from] && byId[e.to]);
+
+  // Columns: triage, plan, one per dependency round, answer.
+  const col = n => n.kind === "triage" || n.kind === "judge" ? 0 : n.kind === "plan" ? 1 : 1 + n.round;
+  const nCols = Math.max(0, ...nodes.map(col)) + 1;
+  // Slots: several nodes of one lane may share a column. An escalated retry sits above its source when free.
+  const taken = {};
+  const slotOf = {};
+  const claim = (n, want) => { let s = want; while (taken[`${col(n)}|${n.lane}|${s}`]) s++; taken[`${col(n)}|${n.lane}|${s}`] = 1; slotOf[n.id] = s; };
+  nodes.filter(n => n.kind !== "retry").forEach(n => claim(n, 0));
+  nodes.filter(n => n.kind === "retry").forEach(n => claim(n, slotOf[n.escalated_from] ?? 0));
+  const colSlots = Array.from({ length: nCols }, (_, c) => Math.max(1, ...nodes.filter(n => col(n) === c).map(n => slotOf[n.id] + 1)));
+  const colStart = colSlots.reduce((acc, k, i) => (acc.push(i ? acc[i - 1] + colSlots[i - 1] : 0), acc), []);
+
+  const LABEL_W = 140, NODE_W = 164, NODE_H = 80, GUT = 44, SLOT_W = NODE_W + GUT, LANE_H = 130, HEAD = 28, TOP = 32;
+  const W = LABEL_W + (colStart[nCols - 1] + colSlots[nCols - 1]) * SLOT_W + 8;
+  const H = HEAD + lanes.length * LANE_H;
+  const laneTop = id => HEAD + laneIdx[id] * LANE_H;
+  const channel = (id, type) => laneTop(id) + 10 + ({ delegated: 0, assigned: 0, result: 5, escalated: 10 }[type] || 0);
+  const box = n => {
+    const x = LABEL_W + GUT / 2 + (colStart[col(n)] + slotOf[n.id]) * SLOT_W, y = laneTop(n.lane) + TOP;
+    return { x, y, w: NODE_W, h: NODE_H, r: x + NODE_W, b: y + NODE_H, cx: x + NODE_W / 2, cy: y + NODE_H / 2 };
+  };
+
+  function orth(pts, rad = 8) {
+    pts = pts.filter((p, i) => !i || p[0] !== pts[i - 1][0] || p[1] !== pts[i - 1][1]);
+    let d = `M${pts[0][0]},${pts[0][1]}`;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], [x2, y2] = pts[i + 1];
+      const d1 = Math.hypot(x1 - x0, y1 - y0), d2 = Math.hypot(x2 - x1, y2 - y1), k = Math.min(rad, d1 / 2, d2 / 2);
+      d += ` L${x1 + (x0 - x1) * k / d1},${y1 + (y0 - y1) * k / d1} Q${x1},${y1} ${x1 + (x2 - x1) * k / d2},${y1 + (y2 - y1) * k / d2}`;
+    }
+    return d + ` L${pts[pts.length - 1][0]},${pts[pts.length - 1][1]}`;
+  }
+  const between = (a, b) => lanes.slice(Math.min(laneIdx[a], laneIdx[b]) + 1, Math.max(laneIdx[a], laneIdx[b]));
+
+  // Spread edges entering the same node so they do not overlap.
+  const incoming = {};
+  edges.forEach(e => (incoming[e.to] ||= []).push(e));
+  const entryDy = e => { const list = incoming[e.to]; const i = list.indexOf(e); return (i - (list.length - 1) / 2) * 9; };
+
+  function route(e) {
+    const s = box(byId[e.from]), t = box(byId[e.to]), sl = byId[e.from].lane, tl = byId[e.to].lane;
+    if (e.type === "escalated" && s.x === t.x) {
+      const clear = between(sl, tl).every(l => !nodes.some(n => n.lane === l.id && box(n).x === s.x));
+      if (clear) return { pts: [[s.r - 28, s.y], [s.r - 28, t.b + 3]], lx: s.r - 20, ly: laneTop(sl) };
+      const gx = s.r + GUT / 2 + 10;
+      return { pts: [[s.r, s.cy], [gx, s.cy], [gx, t.cy], [t.r + 3, t.cy]], lx: gx + 6, ly: laneTop(sl) };
+    }
+    const goff = e.type === "delegated" || e.type === "assigned" ? -14 + 6 * laneIdx[tl] : e.type === "escalated" ? 14 : 6;
+    const gx = s.r + GUT / 2 + goff, dy = entryDy(e);
+    if (sl === tl && t.x - s.r === GUT) return { pts: [[s.r, s.cy], [t.x - 3, t.cy]] };
+    if (t.x - s.r === GUT) return { pts: [[s.r, s.cy], [gx, s.cy], [gx, t.cy + dy], [t.x - 3, t.cy + dy]], lx: gx - 6, ly: laneTop(sl), gx, before: true };
+    const ch = channel(tl, e.type), ex = t.x - GUT / 2 + (e.type === "result" ? 6 : e.type === "escalated" ? 12 : -6);
+    return { pts: [[s.r, s.cy], [gx, s.cy], [gx, ch], [ex, ch], [ex, t.cy + dy], [t.x - 3, t.cy + dy]], lx: gx + 6, ly: laneTop(sl), gx };
+  }
+
+  // View state (per viewer when the host allows storage)
+  const store = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+  const S = { view: store.get("relay-graph-view", "open"), sel: null, show: { delegated: true, escalated: true, result: true } };
+  if (!["open", "collapsed", "hidden"].includes(S.view)) S.view = "open";
+  const pick = st => nodes.find(n => n.status === st);
+  const judges = nodes.filter(n => n.kind === "judge");
+  S.sel = (G.status === "running" ? nodes.find(n => n.status === "running") : null)?.id
+    || (G.route && G.route !== "cloud" ? byId["judge:" + G.route] : null)?.id
+    || (nodes.find(n => (n.kind === "task" || n.kind === "retry") && n.status === "escalated") || pick("failed") || pick("stopped")
+        || judges[judges.length - 1] || nodes[0] || {}).id;
+
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const fmtMs = ms => ms == null ? "" : ms >= 1000 ? (ms / 1000).toFixed(1) + " s" : ms + " ms";
+  const STATUS = {
+    queued: "Queued", running: "Running…", passed: "Passed", failed: "Failed checks", escalated: "Escalated ↑",
+    answered: "Answered locally", stopped: "Stopped",
+  };
+  const statusText = n => n.kind === "judge" && n.signals ? (n.status === "escalated" ? `Score ${pct(n.signals.combined_score)} ↑` : `Trusted · ${pct(n.signals.combined_score)}`)
+    : n.kind === "judge" && n.status === "running" ? "Answering…"
+    : n.kind === "judge" && n.status === "skipped" ? "Skipped ↑"
+    : n.kind === "triage" && n.status === "escalated" ? "Not exact ↑"
+    : n.kind === "plan" && n.status === "passed" ? `${nodes.filter(x => x.kind === "task" && x.lane !== "cloud").length} delegated ↓`
+    : n.kind === "answer" && n.status === "passed" ? "Answer written"
+    : n.kind === "retry" && n.status === "passed" ? `Passed · attempt ${n.attempts.slice(-1)[0]?.n ?? ""}`
+    : STATUS[n.status] || n.status;
+  const KIND = { triage: "Exact extraction", judge: "Local answer", plan: "Plan", task: "Subtask", retry: "Escalated retry", answer: "Answer" };
+  const pct = x => x == null ? "–" : x.toFixed(2);
+
+  function build() {
+    const canvas = $("canvas");
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    const rounds = nodes.filter(n => n.kind === "task").reduce((m, n) => Math.max(m, n.round), 0);
+    const heads = Array.from({ length: nCols }, (_, c) => c === 0 ? (nodes.some(n => n.kind === "judge") ? "Local answers" : "Triage")
+      : nodes.some(n => n.kind === "answer" && col(n) === c) ? "Answer" : c === 1 ? "Plan"
+      : nodes.some(n => n.kind === "answer" && col(n) === c) ? "Answer" : rounds > 1 ? `Subtasks · round ${c - 1}` : "Subtasks");
+    let html = heads.map((h, c) => `<div class="colhead" style="left:${LABEL_W + colStart[c] * SLOT_W}px;width:${colSlots[c] * SLOT_W}px">${h}</div>`).join("");
+    lanes.forEach(l => {
+      html += `<div class="lane" style="top:${laneTop(l.id)}px;height:${LANE_H}px;--lc:${color(l.id)}"><div class="lanelabel">
+        <span class="m">${esc(shortName(l.id))}</span><span class="w">${l.id === "cloud" ? "Cloud" : "Local"}${l.location ? " · " + esc(l.location) : ""}</span><span class="s">${esc(l.model.replace(/^IFM\//, ""))}</span></div></div>`;
+    });
+    if (lanes.length > 1) html += `<div class="axis" style="top:${HEAD + 6}px;height:${lanes.length * LANE_H - 12}px">smaller ← model → larger</div>`;
+    html += `<svg class="edges" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><defs>`;
+    for (const [k, c] of [["local", "var(--local)"], ["mid", "var(--mid)"], ["cloud", "var(--cloud)"], ["escalated", "var(--esc)"], ["result", "var(--line-strong)"]]) {
+      html += `<marker id="ah-${k}" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 Z" fill="${c}"/></marker>`;
+    }
+    html += `</defs>`;
+    const labels = [];
+    const delegLabel = {};
+    edges.forEach((e, i) => {
+      const tl = byId[e.to].lane, r = route(e);
+      const mk = e.type === "delegated" || e.type === "assigned" ? tl : e.type;
+      html += `<path class="edge ${e.type}" id="e${i}" data-type="${e.type === "assigned" ? "delegated" : e.type}" d="${orth(r.pts)}" marker-end="url(#ah-${mk})" style="--ec:${color(tl)}"/>`;
+      if (e.type === "escalated" && e.label) labels.push(`<div class="elabel escalated" data-e="${i}" data-type="escalated" style="left:${r.lx}px;top:${r.ly}px${r.before ? ";transform:translate(-100%,-50%)" : ""}">${byId[e.from].kind === "task" || byId[e.from].kind === "retry" ? "✗" : "↑"} ${esc(e.label)}</div>`);
+      if (e.type === "delegated" && r.gx != null) (delegLabel[tl] ||= { x: r.gx, n: 0, ids: [] }).n++, delegLabel[tl].ids.push(i);
+    });
+    html += `</svg>`;
+    Object.entries(delegLabel).forEach(([tl, d]) => {
+      labels.push(`<div class="elabel delegated" data-deleg="${d.ids.join(" ")}" data-type="delegated" style="--ec:${color(tl)};left:${d.x + 8}px;top:${channel(tl, "delegated")}px">↓ ${d.n} to ${esc(shortName(tl))}</div>`);
+    });
+    html += labels.join("");
+    nodes.forEach(n => {
+      const b = box(n);
+      html += `<button type="button" class="node" id="n-${esc(n.id)}" data-id="${esc(n.id)}" style="left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px;--lc:${color(n.lane)}"></button>`;
+    });
+    canvas.innerHTML = html;
+    canvas.querySelectorAll(".node").forEach(el => {
+      el.addEventListener("click", () => { S.sel = el.dataset.id; renderNodes(); renderDetail(); });
+      for (const [ev, on] of [["mouseenter", true], ["focus", true], ["mouseleave", false], ["blur", false]]) {
+        el.addEventListener(ev, () => highlight(on ? el.dataset.id : null));
+      }
+    });
+  }
+
+  function highlight(id) {
+    const rg = $("rg"), canvas = $("canvas");
+    rg.classList.toggle("hovering", !!id);
+    canvas.querySelectorAll(".lit").forEach(el => el.classList.remove("lit"));
+    if (!id) return;
+    document.getElementById("n-" + id)?.classList.add("lit");
+    edges.forEach((e, i) => {
+      if (e.from !== id && e.to !== id) return;
+      for (const el of [$("e" + i), document.getElementById("n-" + e.from), document.getElementById("n-" + e.to), ...canvas.querySelectorAll(`[data-e="${i}"]`)]) el?.classList.add("lit");
+      canvas.querySelectorAll("[data-deleg]").forEach(l => l.dataset.deleg.split(" ").includes(String(i)) && l.classList.add("lit"));
+    });
+  }
+
+  const confHtml = j => j && j.confidence ? `<span class="conf ${j.confidence}" title="Self-reported confidence: ${j.confidence}"><i></i><i></i><i></i>&nbsp;${j.confidence === "medium" ? "med" : j.confidence}</span>` : "";
+
+  function renderNodes() {
+    nodes.forEach(n => {
+      const el = document.getElementById("n-" + n.id);
+      el.className = `node st-${n.status}` + (S.sel === n.id ? " sel" : "");
+      el.setAttribute("aria-pressed", String(S.sel === n.id));
+      el.setAttribute("aria-label", `${n.title}, ${shortName(n.lane)} model, ${statusText(n).replace(/[↑↓]/g, "")}`);
+      const t = taskOf(n);
+      el.title = t.text ? `${t.label}:\n${t.text.length > 400 ? t.text.slice(0, 399) + "…" : t.text}` : "";
+      const pips = n.attempts.map(a => `<span class="pip ${a.outcome}" style="--lc:${color(a.lane)}">${a.outcome === "passed" ? "✓" : a.outcome === "running" ? "" : "✗"}</span>`).join("");
+      const cls = n.status === "escalated" ? "stesc" : ["failed", "stopped"].includes(n.status) ? "stfail" : "";
+      el.innerHTML = `<span class="ntop"><span class="tag">${esc(shortName(n.lane))}</span>${KIND[n.kind] || ""}</span>
+        <span class="ntitle">${esc(n.title)}</span>
+        <span class="nfoot">${n.attempts.length ? `<span class="pips">${pips}</span>` : ""}<span class="${cls}">${esc(statusText(n))}</span>${confHtml(n.judgment)}</span>`;
+    });
+    edges.forEach((e, i) => {
+      const type = e.type === "assigned" ? "delegated" : e.type;
+      $("e" + i).style.display = S.show[type] ? "" : "none";
+    });
+    $("canvas").querySelectorAll(".elabel").forEach(l => l.hidden = !S.show[l.dataset.type]);
+  }
+
+  function tokenStrip(t) {
+    if (!t || !t.tokens?.length) return "";
+    const spans = t.tokens.map(k => {
+      const alts = (k.alt || []).filter(a => a[0] !== k.t).map(a => `${JSON.stringify(a[0])} ${pct(a[1])}`).join(", ");
+      return `<span style="--u:${Math.round(Math.min(1, (1 - k.p) * 1.5) * 85)}%" title="p = ${pct(k.p)}${alts ? " · alternatives: " + esc(alts) : ""}">${esc(k.t)}</span>`;
+    }).join("");
+    return `<span class="meta">token probability ${pct(t.prob)} (${t.count} tokens of the ${t.span === "answer" ? "answer" : "output"}) · weakest ${esc(JSON.stringify(t.min_token))} at ${pct(t.min_prob)}</span>
+      <div class="tokstrip">${spans}${t.tokens.length < t.count ? "…" : ""}</div><span class="toklegend">Shaded by uncertainty; hover a token for its probability and the alternatives the model considered.</span>`;
+  }
+
+  const RETURNS = { task_answer: "a written answer", report_extraction: "an exact quote from its source",
+                    report_groups: "the reports sorted into labeled groups" };
+  function taskOf(n) {
+    const model = shortName(n.lane);
+    const label = { triage: "Request · exact copy asked for", judge: "Request answered by " + model, plan: "Planning task for " + model,
+      task: "Subtask given to " + model, retry: "Same subtask, retried on " + model, answer: "Final answer task for " + model }[n.kind] || "Task";
+    return { label, text: n.instruction || G.goal || "" };
+  }
+  function taskBlock(n) {
+    const t = taskOf(n);
+    if (!t.text) return "";
+    const meta = [];
+    if (n.inputs?.length) meta.push(`<span>Inputs:</span>${n.inputs.map(i => `<span class="chip">${esc(i)}</span>`).join("")}`);
+    if (n.result_type) meta.push(`<span>Must return ${esc(RETURNS[n.result_type] || n.result_type)}</span>`);
+    return `<div class="task"><span class="tlabel"><span class="tag" style="--lc:${color(n.lane)}">${esc(shortName(n.lane))}</span>${esc(t.label)}</span>
+      <p class="ttext">${esc(t.text)}</p>${meta.length ? `<div class="tmeta">${meta.join("")}</div>` : ""}</div>`;
+  }
+
+  function renderDetail() {
+    const n = byId[S.sel];
+    if (!n) { $("detail").innerHTML = ""; return; }
+    const model = G.lanes.find(l => l.id === n.lane)?.model || n.lane;
+    const atts = n.attempts.map(a => {
+      const passed = a.label ? `✓ ${a.label}` : { triage: "✓ Decided", plan: "✓ Plan passed graph checks", answer: "✓ Answer written" }[n.kind] || "✓ Passed checks";
+      const failed = a.label ? `✗ ${a.label}` : n.kind === "plan" ? "✗ Plan rejected" : "✗ Failed check";
+      const head = a.outcome === "passed" ? passed : a.outcome === "failed" ? failed : a.outcome === "error" ? "✗ Call failed"
+        : a.outcome === "stopped" ? "Stopped" : "Running…";
+      const j = a.judgment;
+      return `<li class="att ${a.outcome}"><span class="n">#${a.n}</span>
+        <span class="h"><span class="tag" style="--lc:${color(a.lane)}">${esc(shortName(a.lane))}</span><span class="o">${head}</span></span>
+        ${a.check ? `<span class="chk">${esc(a.check)}</span>` : ""}
+        ${j && (j.confidence || j.note) ? `<span class="jd">Judgment: ${esc(j.confidence ? j.confidence + " confidence" : "")}${j.note ? ` — “${esc(j.note)}”` : ""}</span>` : ""}
+        <span class="mt">${[a.confidence != null ? "confidence " + pct(a.confidence) : "", a.token_prob != null ? "token prob " + pct(a.token_prob) : "", esc(a.model), fmtMs(a.ms), a.tokens != null ? a.tokens.toLocaleString() + " tokens" : ""].filter(Boolean).join(" · ")}</span></li>`;
+    }).join("");
+    const r = n.result;
+    const result = r == null ? "" : `<div class="sec"><h4>Result</h4>${Array.isArray(r)
+      ? `<div class="result"><ul>${r.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : `<div class="result">${esc(r)}</div>`}</div>`;
+    const j = n.judgment;
+    const judgment = j && (j.confidence || j.note) ? `<div class="sec"><h4>Model's judgment</h4>
+      ${j.confidence ? `<div class="meter ${j.confidence}"><span class="bars"><i></i><i></i><i></i></span><span class="lv">${j.confidence[0].toUpperCase() + j.confidence.slice(1)} confidence</span></div>` : ""}
+      ${j.note ? `<p>“${esc(j.note)}”</p>` : ""}
+      <p class="caveat">Self-reported by the model and not calibrated. The relay accepts results on checks, never on confidence.</p></div>` : "";
+    const escFrom = n.escalated_from && byId[n.escalated_from];
+    // [key, name, what it captures, how it is measured]
+    const SIGNALS = [
+      ["self_uncertainty", "Self uncertainty", "What the model says about its own answer.",
+       "1 − the average confidence (0–1) the model reported with its answers. Small models tend to overstate confidence, so on its own this rarely catches hard problems."],
+      ["token_uncertainty", "Token uncertainty", "How sure the model was of the exact words it wrote.",
+       "1 − the geometric-mean probability of the answer's tokens, from the model's log-probabilities. Rises when the model hesitated between alternatives (see the shaded tokens under Answers). Measured, not self-reported; n/a when the model cannot return log-probabilities."],
+      ["inconsistency", "Inconsistency", "Whether the model gives the same answer twice.",
+       "1 − the text similarity between its answers, sampled at slightly different temperatures. A model that knows the answer repeats it; disagreement suggests guessing."],
+      ["critic_risk", "Critic risk", "What a second look found wrong with the answer.",
+       "The severity (0–1) of the worst flaw the critic reported: factual errors, missed constraints, logic gaps. The critic is the next larger local model when there is one. Counts as 1 when the critic's reply cannot be read."],
+      ["task_complexity", "Task complexity", "How hard the request looks before any model answers.",
+       "A simple heuristic: words like prove, derive, probability, debug (strong) or compare, plan, analyze (moderate), long prompts and several questions. Cheap and predictable, but blind to difficulty that has no telltale words."],
+      ["explicit_escalation", "Explicit escalation", "Whether the model asked for a larger model.",
+       "1 if the model set needs_escalation or its reply could not be parsed, 0 otherwise. A request for help also escalates directly, by rule."],
+    ];
+    let routing = "";
+    if (n.kind === "judge" && n.status === "skipped") {
+      routing = `<div class="sec"><h4>Skipped</h4><p>${esc(n.reason)}. The request went straight to the next model.</p></div>`;
+    }
+    if (n.kind === "judge" && n.signals) {
+      const sc = n.signals.combined_score, thr = n.threshold ?? 0.5, w = n.weights || {};
+      const wsum = Object.keys(w).filter(k => n.signals[k] != null).reduce((a, k) => a + w[k], 0) || 1;
+      routing = `<div class="sec"><h4>Routing score</h4><div class="score">
+          <div class="scoreline"><b>${pct(sc)}</b><span class="muted">threshold ${pct(thr)}</span><span class="${n.decision === "escalate" ? "stesc" : ""}">${n.decision === "escalate" ? "Escalated ↑" : "Trusted, answered here"}</span></div>
+          <div class="scorebar" role="img" aria-label="Score ${pct(sc)} against threshold ${pct(thr)}"><span class="fill ${sc >= thr ? "over" : ""}" style="width:${Math.min(100, sc * 100)}%"></span><span class="thr" style="left:calc(${thr * 100}% - 1px)"></span></div>
+          <p class="by">${esc(n.reason)}</p></div></div>
+        <div class="sec"><h4>Signals</h4><table class="signals"><thead><tr><th>Signal</th><th></th><th class="num">Value</th><th class="num">× weight</th><th class="num">= adds</th></tr></thead><tbody>
+          ${SIGNALS.map(([k, name, what, how]) => { const v = n.signals[k]; const na = v == null; return `<tr><td><span class="tip" tabindex="0" aria-describedby="tip-${k}">${name}<span class="i" aria-hidden="true">ⓘ</span><span class="tipbox" role="tooltip" id="tip-${k}"><b>${esc(what)}</b>${esc(how)}<span class="how">Weight ${w[k] != null ? w[k].toFixed(2) : "–"}${na ? " · not available for this model, so left out of the score" : ` · adds ${(v * (w[k] ?? 0) / wsum).toFixed(3)} to the score`}</span></span></span></td><td><span class="sbar"><i style="width:${(v ?? 0) * 100}%"></i></span></td>
+            <td class="num">${na ? "n/a" : pct(v)}</td><td class="num">${w[k] != null ? w[k].toFixed(2) : "–"}</td><td class="num">${na || w[k] == null ? "–" : (v * w[k] / wsum).toFixed(3)}</td></tr>`; }).join("")}
+          </tbody></table><p class="caveat">Score = weighted mean of the available signals${SIGNALS.some(([k]) => n.signals[k] == null) ? "; n/a signals are left out and the other weights rescaled" : ""}.</p></div>`;
+    }
+    const samples = n.kind === "judge" && n.samples?.length ? `<div class="sec"><h4>Answers</h4><div class="samples">${n.samples.map((x, i) => `
+        <div class="sample"><span class="meta">#${i + 1} · confidence ${pct(x.confidence)} · ${esc(x.task_type)} · difficulty ${esc(x.difficulty)}${x.needs_escalation ? " · asked for a larger model" : ""}${x.repaired ? " · malformed JSON repaired" : ""}</span>
+        <span>${esc(x.answer.length > 400 ? x.answer.slice(0, 399) + "…" : x.answer)}</span>${x.reason ? `<span class="jd muted">“${esc(x.reason)}”</span>` : ""}
+        ${tokenStrip(x.token_stats)}</div>`).join("")}</div></div>` : "";
+    const critic = n.kind === "judge" && n.critique ? `<div class="sec"><h4>Critic${n.critique.tier && n.critique.tier !== n.lane ? " · " + esc(shortName(n.critique.tier)) : ""}</h4><p>${n.critique.skipped ? '<span class="muted">Skipped.</span> ' : n.critique.passed ? "✓ Passed · " : `<span class="stfail">✗ Failed</span> · `}${n.critique.skipped ? "" : "severity " + pct(n.critique.severity) + " · "}${esc(n.critique.critique)}</p></div>` : "";
+    $("detail").innerHTML = `
+      <div class="dhead"><span class="tag" style="--lc:${color(n.lane)}">${esc(shortName(n.lane))}</span><h3>${esc(n.title)}</h3>
+        ${n.task_id ? `<span class="mono muted">${esc(n.task_id)}</span>` : ""}<span class="pill ${n.status}">${esc(statusText(n))}</span></div>
+      ${taskBlock(n)}
+      <div class="dgrid">
+        <div class="dcol">
+          <div class="sec"><h4>Why ${esc(model)}</h4><p>${n.why ? esc(n.why) : '<span class="muted">No reason given by the planner.</span>'}</p><p class="by">${esc(n.by)}</p></div>
+          ${escFrom ? `<div class="sec"><h4>Escalated from ${esc(shortName(escFrom.lane))}</h4><p class="chk" style="font:12px var(--mono);color:var(--fail)">${esc(n.escalation_reason || "Failed its checks")}</p></div>` : ""}
+          ${routing}
+          ${n.subtasks?.length ? `<div class="sec"><h4>Subtasks in the plan</h4><div class="subtasks">${n.subtasks.map(t => `
+            <div class="subtask"><span class="st"><span class="tag" style="--lc:${color(t.lane)}">${esc(shortName(t.lane))}</span>${esc(t.title)}</span>
+            <span>${esc(t.instruction)}</span>${t.why ? `<span class="by">Why ${esc(shortName(t.lane))}: ${esc(t.why)}</span>` : ""}</div>`).join("")}</div></div>` : ""}
+          ${n.kind === "judge" ? "" : judgment}
+        </div>
+        <div class="dcol">
+          ${atts ? `<div class="sec"><h4>${n.kind === "judge" ? "Calls" : "Attempts"}</h4><ol class="attempts">${atts}</ol></div>` : ""}
+          ${samples}${critic}
+          ${n.kind === "judge" ? "" : result}
+        </div>
+      </div>`;
+  }
+
+  function renderBar() {
+    const tasks = nodes.filter(n => n.kind === "task");
+    const byLane = {};
+    tasks.forEach(t => byLane[t.lane] = (byLane[t.lane] || 0) + 1);
+    const escalations = nodes.filter(n => n.kind === "retry").length;
+    const triage = byId.triage, plan = byId.plan, answer = byId.answer;
+    let chips = "";
+    if (triage) chips += `<span class="chip" style="--c:${color("local")}"><span class="mono">${esc(shortName("local"))}</span>exact extraction${triage.status === "answered" ? " ✓" : ""}</span>`;
+    judges.forEach((j, i) => {
+      if (i || triage) chips += `<span class="sep">↑</span>`;
+      const sc = j.status === "skipped" ? "skipped" : j.signals ? "score " + pct(j.signals.combined_score) : "…";
+      chips += `<span class="chip" style="--c:${j.status === "escalated" || j.status === "skipped" ? "var(--esc)" : color(j.lane)}"><span class="mono">${esc(shortName(j.lane))}</span>${sc}${j.status === "escalated" ? " ↑" : j.status === "passed" ? " ✓ trusted" : ""}</span>`;
+    });
+    if (plan) chips += `<span class="sep">↑</span><span class="chip" style="--c:${color("cloud")}"><span class="mono">${esc(shortName("cloud"))}</span>plan</span>`;
+    if (tasks.length) chips += `<span class="sep">↓</span><span class="chip" style="--c:${color("local")}">${tasks.length} subtasks<span class="mono">${Object.entries(byLane).map(([l, k]) => `${esc(shortName(l))} ×${k}`).join(" · ")}</span></span>`;
+    if (escalations) chips += `<span class="chip" style="--c:var(--esc)">${escalations} escalated ↑</span>`;
+    if (answer) chips += `<span class="sep">${plan ? "→" : "↑"}</span><span class="chip" style="--c:${color("cloud")}"><span class="mono">${esc(shortName("cloud"))}</span>answer</span>`;
+    if (G.simulated) chips += `<span class="badge">Simulated</span>`;
+    $("route").innerHTML = chips;
+    const atts = nodes.flatMap(n => n.attempts).filter(a => a.outcome !== "running");
+    const cloud = atts.filter(a => a.lane === "cloud").length;
+    const time = G.metrics ? fmtMs(G.metrics.elapsed_ms) : G.status === "running" ? "running" : "";
+    $("stats").textContent = [`${atts.length - cloud} local`, `${cloud} cloud`, time].filter(Boolean).join(" · ");
+  }
+
+  function renderView() {
+    $("hiddenBar").hidden = S.view !== "hidden";
+    $("main").hidden = S.view === "hidden";
+    $("body").hidden = S.view !== "open";
+    $("toggle").textContent = S.view === "open" ? "Collapse" : "Show graph";
+    $("toggle").setAttribute("aria-expanded", String(S.view === "open"));
+    store.set("relay-graph-view", S.view);
+    reportHeight();
+  }
+
+  // Hosts such as Open WebUI size an embedded frame from this message.
+  function reportHeight() {
+    const height = Math.ceil(document.documentElement.getBoundingClientRect().height);
+    try { parent.postMessage({ type: "iframe:height", height }, "*"); } catch {}
+  }
+  if (window.ResizeObserver) new ResizeObserver(reportHeight).observe(document.body);
+
+  $("toggle").addEventListener("click", () => { S.view = S.view === "open" ? "collapsed" : "open"; renderView(); });
+  $("hide").addEventListener("click", () => { S.view = "hidden"; renderView(); $("show").focus(); });
+  $("show").addEventListener("click", () => { S.view = "open"; renderView(); $("toggle").focus(); });
+  document.querySelectorAll(".toggle[data-edge]").forEach(b => b.addEventListener("click", () => {
+    const k = b.dataset.edge; S.show[k] = !S.show[k]; b.setAttribute("aria-pressed", String(S.show[k])); renderNodes();
+  }));
+
+  build();
+  renderNodes();
+  renderBar();
+  renderDetail();
+  renderView();
+})();
+</script>
+</body>
+</html>

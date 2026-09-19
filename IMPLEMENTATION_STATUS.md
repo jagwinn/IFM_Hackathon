@@ -203,7 +203,7 @@ scenario selection, optional delay, JSONL progress events, and disabled-cloud
 behavior:
 
 ```sh
-PYTHONPATH=relay/src python3 -m horizon_relay --scenario escalate --events
+PYTHONPATH=relay/src python3 -m horizon_relay demo --scenario escalate --events
 ```
 
 ## Docker and configuration
@@ -257,6 +257,7 @@ Run the suite with the live dependency installed:
 ```sh
 python3 -m pip install -e './relay[live]'
 python3 -m unittest discover -s relay/tests -v
+python3 -m unittest discover -s integrations/openwebui -v
 ```
 
 HTTP unit tests use mock transports and do not incur API costs. Separate real
@@ -283,21 +284,28 @@ acceptance checks; unit-level cancellation coverage is already present.
 
 | Path | Responsibility |
 | --- | --- |
-| `relay/src/horizon_relay/engine.py` | Scheduling, budgets, repair, cancellation, events, metrics |
-| `relay/src/horizon_relay/schemas.py` | Plan/task/result types and graph validation |
-| `relay/src/horizon_relay/validators.py` | Worker output checks |
-| `relay/src/horizon_relay/providers.py` | Provider interface and deterministic simulation |
-| `relay/src/horizon_relay/live.py` | Real HTTP providers, prompts, reasoning cleanup, usage |
-| `relay/src/horizon_relay/chat.py` | Conversation normalization, live routing and background calls |
-| `relay/src/horizon_relay/config.py` | Engine limits |
-| `relay/src/horizon_relay/__main__.py` | Simulation CLI |
+| `relay/README.md` | How the relay works, where to change what, Python/CLI usage |
+| `relay/src/horizon_relay/relay.py` | Public entry point: `Relay.from_env()`, `chat`, `run`, `complete` |
+| `relay/src/horizon_relay/policy.py` | Routing rules: local acceptance, retries, escalation, plan attempts |
+| `relay/src/horizon_relay/prompts.py` | Instructions sent to the models at each step |
+| `relay/src/horizon_relay/results.py` | Subtask result types and their checks |
+| `relay/src/horizon_relay/engine.py` | Scheduling, repair, cancellation, events, metrics |
+| `relay/src/horizon_relay/plan.py` | Planner task-graph validation |
+| `relay/src/horizon_relay/budget.py` | Cloud call accounting |
+| `relay/src/horizon_relay/settings.py` | Limits and environment configuration |
+| `relay/src/horizon_relay/conversation.py` | Chat messages to relay requests, `/local-extract` |
+| `relay/src/horizon_relay/events.py` | Front-end-neutral progress events |
+| `relay/src/horizon_relay/graph.py` | Decision graph built from events (`RunGraph`, `render_html`) |
+| `relay/src/horizon_relay/ui/graph.html` | Self-contained decision graph renderer |
+| `relay/src/horizon_relay/providers/` | Provider interface, OpenAI-compatible HTTP client, simulation |
+| `relay/src/horizon_relay/cli.py`, `demo.py` | `horizon-relay ask` / `demo` |
 | `relay/src/horizon_relay/fixtures/bug_reports.json` | Built-in demo inputs |
-| `relay/tests/` | Core, Pipe, and live adapter tests |
-| `integrations/openwebui/horizon_relay_pipe.py` | Open WebUI adapter |
+| `relay/tests/` | Engine, policy, API, CLI, and HTTP adapter tests |
+| `integrations/openwebui/` | Open WebUI Pipe adapter, startup installer, Pipe tests |
 | `deployment/` | Docker build/runtime definitions and setup documentation |
 | `open-webui/` | Unmodified upstream UI/backend source |
 
-The Python package is `horizon-relay` version 0.2.0 and requires Python 3.11+.
+The Python package is `horizon-relay` version 0.3.0 and requires Python 3.11+.
 The core/simulator is dependency-free; the `live` extra adds HTTPX.
 
 ## Remaining work

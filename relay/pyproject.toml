@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "horizon-relay"
-version = "0.2.0"
-description = "Bounded planner-worker orchestration for Open WebUI"
+version = "0.3.0"
+description = "Local-first relay: a small local model answers and works subtasks; a large cloud model plans and checks"
 requires-python = ">=3.11"
 dependencies = []
 
@@ -13,10 +13,10 @@ dependencies = []
 live = ["httpx>=0.28,<1"]
 
 [project.scripts]
-horizon-relay = "horizon_relay.__main__:main"
+horizon-relay = "horizon_relay.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-horizon_relay = ["fixtures/*.json"]
+horizon_relay = ["fixtures/*.json", "ui/*.html"]
