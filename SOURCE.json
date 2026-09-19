@@ -1,0 +1,16 @@
+{
+  "repository": "https://github.com/open-webui/open-webui",
+  "tag": "v0.11.3",
+  "commit": "2a960a59fe1dbbd35282f0556b3666d81102e781",
+  "release_url": "https://github.com/open-webui/open-webui/releases/tag/v0.11.3",
+  "archive_url": "https://api.github.com/repos/open-webui/open-webui/tarball/v0.11.3",
+  "archive_sha256": "442f5d8ea293ec0a887c46e08e9facfa5fca1ff11283739cf2b839203ee4a83f",
+  "downloaded_on": "2026-09-19",
+  "source_directory": "open-webui",
+  "format": "Release source archive; no .git history; upstream files unmodified",
+  "verification": {
+    "regular_files_compared_with_archive": 5060,
+    "all_compared_files_identical": true,
+    "package_version": "0.11.3"
+  }
+}
