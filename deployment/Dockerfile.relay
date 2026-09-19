@@ -1,0 +1,4 @@
+FROM ghcr.io/open-webui/open-webui:v0.11.3
+COPY relay /opt/horizon-relay
+RUN python -m pip install --no-cache-dir --no-deps /opt/horizon-relay
+COPY integrations/openwebui/horizon_relay_pipe.py /opt/horizon-relay/horizon_relay_pipe.py

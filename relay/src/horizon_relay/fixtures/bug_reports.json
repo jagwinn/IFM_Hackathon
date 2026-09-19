@@ -1,0 +1,4 @@
+{
+  "report_1": "Checkout fails after applying the SAVE10 coupon. Reproduce: add an item, enter SAVE10, and press Pay. The page shows error 500; the order is not created.",
+  "report_2": "The cart subtotal does not refresh after removing an item. Reproduce: add two items, remove one, and inspect the subtotal. Reloading the page fixes the displayed amount."
+}

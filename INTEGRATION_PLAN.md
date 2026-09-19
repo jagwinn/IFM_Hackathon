@@ -6,7 +6,7 @@ Expose **Horizon Relay** as an Open WebUI Pipe model. Implement the orchestratio
 
 The product behavior remains: try locally → escalate the reasoning to the large cloud model → delegate bounded subtasks back to the local model → validate and repair → assemble the response.
 
-This is an integration plan, not an implemented relay. The upstream source is downloaded; no models, credentials, application dependencies, or running services have been configured.
+Implementation status: the first prototype now includes the async Pipe, simulated provider, dependency-aware engine, validation, budgets, cancellation, CLI scenarios, and direct engine/Pipe tests. Real models and the custom graph are deferred. Docker startup and browser acceptance remain unverified; see `deployment/README.md`. The sections below remain the broader roadmap.
 
 ## Source baseline
 
@@ -71,7 +71,7 @@ The Pipe may receive no event emitter on plain API calls. Final responses must s
 Create these beside the downloaded source, keeping the relay package independent of upstream internals:
 
 ```text
-outputs/
+IFM_Hackathon/
   open-webui/                         # downloaded upstream baseline
   relay/
     pyproject.toml
