@@ -1,0 +1,13 @@
+**
+!relay/
+!relay/pyproject.toml
+!relay/src/
+!relay/src/horizon_relay/
+!relay/src/horizon_relay/**
+!integrations/
+!integrations/openwebui/
+!integrations/openwebui/horizon_relay_pipe.py
+!deployment/
+!deployment/Dockerfile.relay
+**/__pycache__/
+**/*.pyc

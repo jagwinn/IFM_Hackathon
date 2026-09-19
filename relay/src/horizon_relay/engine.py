@@ -55,6 +55,7 @@ class _Run:
         self.calls, self.results = [], {}
         self.cloud_count = self.cloud_workers = 0
         self.local_slots = asyncio.Semaphore(limits.local_concurrency)
+        self.event_lock = asyncio.Lock()
 
     def metrics(self):
         return {
@@ -75,12 +76,15 @@ class _Run:
                       "event": name, "simulated": self.provider.simulated, **fields},
         }}
         if self.emit:
-            try:
-                async with asyncio.timeout(1):
-                    await self.emit(event)
-            except Exception:
-                # UI delivery failure must not duplicate provider calls or lose the answer.
-                log.warning("Relay progress delivery failed")
+            # Open WebUI persists history using a read/append/write operation.
+            # Concurrent callbacks can otherwise overwrite a sibling's status.
+            async with self.event_lock:
+                try:
+                    async with asyncio.timeout(1):
+                        await self.emit(event)
+                except Exception:
+                    # UI delivery failure must not duplicate provider calls or lose the answer.
+                    log.warning("Relay progress delivery failed")
 
     async def call(self, tier, operation, payload):
         if tier == "cloud":

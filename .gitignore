@@ -14,3 +14,5 @@ node_modules/
 *.sqlite3-*
 .webui_secret_key
 /work/
+/relay/build/
+*.egg-info/

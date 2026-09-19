@@ -44,6 +44,15 @@ Progress appears in the existing expandable status history. All events and answe
 
 Set unrelated tools and global filters aside for this demo. The Pipe handles title/tag/follow-up requests locally with scripted output; once a real local endpoint exists, configure it as Open WebUI's task model. `CLOUD_ENABLED=false` disables even simulated cloud stages while permitting the local scenario.
 
+For a fresh single-user demo only, set `WEBUI_AUTH=false` in `.env` before first startup to skip account setup. The port remains bound to localhost. The current local demo uses this mode. Keep the same Compose project name (`-p horizon-relay`) when managing it so Docker reuses its data volume.
+
+```sh
+docker compose --env-file .env -f deployment/compose.relay.yaml -p horizon-relay up --build -d
+docker compose --env-file .env -f deployment/compose.relay.yaml -p horizon-relay stop
+```
+
+The Compose configuration disables external model connections and model downloads for this simulated demo. Enable and configure them when adding the real provider adapters.
+
 ## Browser acceptance checklist
 
 These require a running Open WebUI instance and are not covered by direct Pipe unit tests:
@@ -58,4 +67,4 @@ These require a running Open WebUI instance and are not covered by direct Pipe u
 
 Real HTTP provider adapters, model downloads, arbitrary text tasks, uploads/RAG, model token streaming, custom task-graph UI, and all-cloud benchmarking. Real model IDs and the cloud API URL are intentionally not guessed.
 
-The Docker image build and browser acceptance checklist have not been run on the development machine because Docker is unavailable there. The engine and Pipe are tested directly with Python.
+Verified locally with Docker Desktop: image build, healthy container on port 3000, Pipe registration, HTTP completion, browser escalation demo, and saved answer/status history after reload. Browser Stop, temporary chats, and multi-user behavior still need dedicated acceptance checks. The engine and Pipe also have direct Python tests.

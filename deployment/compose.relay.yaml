@@ -10,6 +10,11 @@ services:
       RELAY_PROVIDER: simulated
       CLOUD_ENABLED: "true"
       ENABLE_PLUGINS: "true"
+      WEBUI_AUTH: "${WEBUI_AUTH:-true}"
+      OFFLINE_MODE: "true"
+      RAG_EMBEDDING_ENGINE: "openai"
+      ENABLE_OLLAMA_API: "false"
+      ENABLE_OPENAI_API: "false"
     volumes:
       - relay-webui-data:/app/backend/data
     extra_hosts:

@@ -24,7 +24,7 @@ PYTHONPATH=relay/src python3 -m horizon_relay --scenario escalate --events
 PYTHONPATH=relay/src python3 -m unittest discover -s relay/tests -v
 ```
 
-The demo uses built-in bug reports and scripted responses; no real model calls or API keys are involved. Open WebUI's existing frontend is unchanged. Container startup, chat reload, and browser Stop behavior still need testing with Docker. The direct engine/Pipe tests cover the execution logic; they do not substitute for browser acceptance.
+The demo uses built-in bug reports and scripted responses; no real model calls or API keys are involved. Open WebUI's existing frontend is unchanged. Docker startup, the browser escalation demo, and saved chat reload have been verified locally. Browser Stop and multi-user behavior still need dedicated acceptance checks.
 
 Next: run the [Open WebUI setup](deployment/README.md), then implement the real local/cloud provider adapters after confirming the endpoints and model IDs.
 

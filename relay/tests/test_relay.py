@@ -216,6 +216,18 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         a.results.clear()
         self.assertEqual(len(b.results), 3)
 
+    async def test_status_persistence_is_serialized(self):
+        saved = []
+        async def read_append_write(event):
+            nonlocal saved
+            snapshot = list(saved)
+            await asyncio.sleep(0.001)
+            saved = snapshot + [event["data"]["relay"]["seq"]]
+        await RelayEngine(SimulatedProvider("escalate"), Limits(local_concurrency=2)).run(
+            "Goal", demo_sources(), emit=read_append_write,
+        )
+        self.assertEqual(saved, list(range(1, 19)))
+
     async def test_plan_validation(self):
         provider = SimulatedProvider()
         raw = (await provider.complete("cloud", "plan", {"sources": demo_sources()})).value

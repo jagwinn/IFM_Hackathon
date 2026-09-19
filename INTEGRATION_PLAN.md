@@ -6,7 +6,7 @@ Expose **Horizon Relay** as an Open WebUI Pipe model. Implement the orchestratio
 
 The product behavior remains: try locally → escalate the reasoning to the large cloud model → delegate bounded subtasks back to the local model → validate and repair → assemble the response.
 
-Implementation status: the first prototype now includes the async Pipe, simulated provider, dependency-aware engine, validation, budgets, cancellation, CLI scenarios, and direct engine/Pipe tests. Real models and the custom graph are deferred. Docker startup and browser acceptance remain unverified; see `deployment/README.md`. The sections below remain the broader roadmap.
+Implementation status: the first prototype now includes the async Pipe, simulated provider, dependency-aware engine, validation, budgets, cancellation, CLI scenarios, and direct engine/Pipe tests. Docker startup, browser escalation, and saved answer/status history have been verified. Real models, the custom graph, and remaining browser acceptance checks are deferred; see `deployment/README.md`. The sections below remain the broader roadmap.
 
 ## Source baseline
 
