@@ -1,0 +1,34 @@
+services:
+  local-model:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.local-model
+    volumes:
+      - "${LOCAL_MODEL_PATH:?Set LOCAL_MODEL_PATH to the official 0.9B GGUF}:/models/model.gguf:ro"
+    restart: unless-stopped
+  local-model-4b:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.local-model
+    volumes:
+      - "${LOCAL_MODEL_4B_PATH:?Set LOCAL_MODEL_4B_PATH to the 4B (3.7B) GGUF}:/models/model.gguf:ro"
+    command: ["--model", "/models/model.gguf", "--host", "0.0.0.0", "--port", "8080", "--ctx-size", "8192", "--parallel", "1", "--threads", "4", "--alias", "IFM/K2-Horizon-4B"]
+    restart: unless-stopped
+  open-webui:
+    depends_on:
+      - local-model
+      - local-model-4b
+    environment:
+      RELAY_PROVIDER: live
+      LOCAL_BASE_URL: http://local-model:8080/v1
+      LOCAL_MODEL: IFM/K2-Horizon-0.9B
+      # Middle relay tier: the planner can delegate moderate work here, and failed 0.9B subtasks escalate here first.
+      MID_BASE_URL: http://local-model-4b:8080/v1
+      MID_MODEL: IFM/K2-Horizon-4B
+      # Shown in the decision graph. Local models report their GPU themselves (deployment/serve-model.sh).
+      CLOUD_LOCATION: IFM API
+      # Direct chat connections next to the Horizon Relay Pipe: 0.9B, 4B, then the IFM cloud API.
+      # Open WebUI persists these on first start; later edits in Admin > Connections take precedence.
+      ENABLE_OPENAI_API: "true"
+      OPENAI_API_BASE_URLS: "http://local-model:8080/v1;http://local-model-4b:8080/v1;${CLOUD_BASE_URL:-https://api.ifm.ai/v1}"
+      OPENAI_API_KEYS: ";;${CLOUD_API_KEY:-}"

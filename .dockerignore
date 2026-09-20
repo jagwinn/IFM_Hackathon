@@ -1,0 +1,17 @@
+**
+!relay/
+!relay/pyproject.toml
+!relay/src/
+!relay/src/horizon_relay/
+!relay/src/horizon_relay/**
+!integrations/
+!integrations/openwebui/
+!integrations/openwebui/horizon_relay_pipe.py
+!integrations/openwebui/sync_pipe.py
+!deployment/
+!deployment/Dockerfile.relay
+!deployment/Dockerfile.local-model
+!deployment/Dockerfile.local-model-gpu
+!deployment/serve-model.sh
+**/__pycache__/
+**/*.pyc
