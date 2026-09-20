@@ -111,6 +111,16 @@ relay = Relay.from_env(policy=policy)
 
 A rule is any function taking a `Verdict` (tier, answers, critique, signals) and returning True (escalate), False (keep) or None (no opinion). Environment variables cover the common knobs: `ESCALATION_THRESHOLD`, `LOCAL_SAMPLES`, `RELAY_CROSS_CRITIC`, `RELAY_CLOUD_MODE`, `SKIP_SMALL_ABOVE`.
 
+### Watching a run
+
+Every model call is streamed. While a call is in flight the relay emits `call_output` events with what the model
+has written so far (about every 1.5 s), and each finished call records what the model reasoned and the raw text it
+wrote. The decision graph shows the live text on the running step and keeps both as collapsible sections, so the
+thinking is visible without being mistaken for the answer. The Open WebUI status line follows the same events.
+
+How much the models think before answering is set by `RELAY_REASONING_EFFORT` (default `low`, so there is little
+thinking to show), or per model with `LOCAL_REASONING_EFFORT`, `MID_REASONING_EFFORT` and `CLOUD_REASONING_EFFORT`.
+
 ### Routing tests and tuning
 
 [`fixtures/routing_tests.json`](src/horizon_relay/fixtures/routing_tests.json) holds 25 labeled requests: 7 for the 0.9B, 8 for the 4B, 7 for the cloud and 3 that force a path (0.9B → 4B, cloud plan-and-delegate, cloud direct). Each lists the models allowed to answer and, where possible, a pattern the answer must match.

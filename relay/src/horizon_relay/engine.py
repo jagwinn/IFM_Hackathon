@@ -24,6 +24,9 @@ from .tokens import answer_token_stats
 
 log = logging.getLogger(__name__)
 
+LIVE_INTERVAL = 1.5  # seconds between live-output events while a model writes
+LIVE_LIMIT = 6000  # characters of thinking/answer kept for display
+
 SIMULATED_LABEL = "**SIMULATED DEMO — built-in bug reports; no real model or API calls.**\n\n"
 
 
@@ -290,28 +293,53 @@ class _Run:
         record = {"tier": tier, "operation": operation, "task_id": task.get("id") if isinstance(task, dict) else None,
                   "attempt": payload.get("attempt"), "for_tier": payload.get("for_tier"), "model": None, "prompt_tokens": None,
                   "completion_tokens": None, "outcome": "started", "elapsed_ms": 0, "judgment": None,
-                  "token_stats": None}
+                  "token_stats": None, "output": None}
         self.calls.append(record)
         start = time.monotonic()
+        live = {"text": "", "shown": 0}
+        watcher = None
         try:
             async with asyncio.timeout(self.limits.call_timeout):
-                reply = await self.provider.complete(tier, operation, payload)
+                if self.emit and getattr(self.provider, "streams", False):
+                    watcher = asyncio.create_task(self.follow(record, live))
+                    reply = await self.provider.complete(tier, operation, payload, on_delta=lambda text: live.update(text=live["text"] + text))
+                else:
+                    reply = await self.provider.complete(tier, operation, payload)
             if not isinstance(reply, Reply) or not reply.model:
                 raise RelayError("Invalid provider response envelope")
             value, judgment = split_judgment(reply.value) if operation in ("attempt", "work") else (reply.value, None)
             record.update(model=reply.model, prompt_tokens=reply.prompt_tokens,
                           completion_tokens=reply.completion_tokens, outcome="completed", judgment=judgment,
-                          token_stats=answer_token_stats(reply.tokens))
+                          token_stats=answer_token_stats(reply.tokens),
+                          output={"thinking": reply.thinking[:LIVE_LIMIT], "answer": reply.text[:LIVE_LIMIT]})
         except asyncio.CancelledError:
             record.update(outcome="cancelled", elapsed_ms=round((time.monotonic() - start) * 1000))
             raise
         except Exception:
-            record.update(outcome="failed", elapsed_ms=round((time.monotonic() - start) * 1000))
+            record.update(outcome="failed", elapsed_ms=round((time.monotonic() - start) * 1000),
+                          output={"thinking": "", "answer": live["text"][:LIVE_LIMIT]})
             await self.event("call_finished", f"{tier} {operation} call failed", **record)
             raise
+        finally:
+            if watcher:
+                watcher.cancel()
         record["elapsed_ms"] = round((time.monotonic() - start) * 1000)
         await self.event("call_finished", f"{tier} {operation} call finished", **record)
         return value, record
+
+    async def follow(self, record, live):
+        """While a call streams, publish what the model has written so far, a few times a second at most."""
+        try:
+            while True:
+                await asyncio.sleep(LIVE_INTERVAL)
+                if len(live["text"]) == live["shown"]:
+                    continue
+                live["shown"] = len(live["text"])
+                await self.event("call_output", "Model is writing", tier=record["tier"], operation=record["operation"],
+                                 task_id=record["task_id"], for_tier=record["for_tier"], attempt=record["attempt"],
+                                 output=live["text"][-LIVE_LIMIT:], written=len(live["text"]))
+        except asyncio.CancelledError:
+            pass
 
     async def event(self, name, message, *, done=False, **data):
         self.seq += 1

@@ -156,6 +156,14 @@ svg.edges { position: absolute; inset: 0; overflow: visible; pointer-events: non
 .sbar { display: block; width: 80px; height: 6px; border-radius: 3px; background: var(--surface-2); position: relative; overflow: hidden; }
 .sbar i { position: absolute; inset: 0 auto 0 0; background: var(--muted); display: block; }
 .samples { display: grid; gap: 6px; }
+.live { display: grid; gap: 4px; }
+.livebox { font: 12px/1.5 var(--mono); background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 10px; max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
+.livebox.now { border-color: color-mix(in srgb, var(--lc, var(--muted)) 50%, transparent); color: var(--text); }
+details.think { border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; }
+details.think summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+details.think[open] summary { margin-bottom: 5px; }
+.dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--esc); animation: pulse 1s ease-in-out infinite; }
 .tokstrip { font: 12px/1.9 var(--mono); overflow-wrap: anywhere; white-space: pre-wrap; }
 .tokstrip span { border-radius: 3px; padding: 1px 0; background: color-mix(in srgb, var(--esc) var(--u), transparent); cursor: help; }
 .toklegend { font-size: 11px; color: var(--faint); }
@@ -334,7 +342,7 @@ svg.edges { position: absolute; inset: 0; overflow: visible; pointer-events: non
     });
     canvas.innerHTML = html;
     canvas.querySelectorAll(".node").forEach(el => {
-      el.addEventListener("click", () => { S.sel = el.dataset.id; renderNodes(); renderDetail(); });
+      el.addEventListener("click", () => { S.sel = el.dataset.id; renderNodes(); renderDetail(); scrollLive(); });
       for (const [ev, on] of [["mouseenter", true], ["focus", true], ["mouseleave", false], ["blur", false]]) {
         el.addEventListener(ev, () => highlight(on ? el.dataset.id : null));
       }
@@ -405,6 +413,10 @@ svg.edges { position: absolute; inset: 0; overflow: visible; pointer-events: non
       <p class="ttext">${esc(t.text)}</p>${meta.length ? `<div class="tmeta">${meta.join("")}</div>` : ""}</div>`;
   }
 
+  function scrollLive() {
+    document.querySelectorAll("[data-live]").forEach(el => { el.scrollTop = el.scrollHeight; });
+  }
+
   function renderDetail() {
     const n = byId[S.sel];
     if (!n) { $("detail").innerHTML = ""; return; }
@@ -418,6 +430,9 @@ svg.edges { position: absolute; inset: 0; overflow: visible; pointer-events: non
       return `<li class="att ${a.outcome}"><span class="n">#${a.n}</span>
         <span class="h"><span class="tag" style="--lc:${color(a.lane)}">${esc(shortName(a.lane))}</span><span class="o">${head}</span></span>
         ${a.check ? `<span class="chk">${esc(a.check)}</span>` : ""}
+        ${a.live ? `<span class="live"><span class="jd"><span class="dot"></span> writing now…</span><span class="livebox now" style="--lc:${color(a.lane)}" data-live="1">${esc(a.live)}</span></span>` : ""}
+        ${a.thinking ? `<details class="think"><summary>Thinking · ${a.thinking.length.toLocaleString()} characters</summary><div class="livebox">${esc(a.thinking)}</div></details>` : ""}
+        ${a.text ? `<details class="think"><summary>What the model wrote · ${a.text.length.toLocaleString()} characters</summary><div class="livebox">${esc(a.text)}</div></details>` : ""}
         ${j && (j.confidence || j.note) ? `<span class="jd">Judgment: ${esc(j.confidence ? j.confidence + " confidence" : "")}${j.note ? ` — “${esc(j.note)}”` : ""}</span>` : ""}
         <span class="mt">${[a.confidence != null ? "confidence " + pct(a.confidence) : "", a.token_prob != null ? "token prob " + pct(a.token_prob) : "", esc(a.model), fmtMs(a.ms), a.tokens != null ? a.tokens.toLocaleString() + " tokens" : ""].filter(Boolean).join(" · ")}</span></li>`;
     }).join("");
@@ -541,6 +556,7 @@ svg.edges { position: absolute; inset: 0; overflow: visible; pointer-events: non
   renderNodes();
   renderBar();
   renderDetail();
+  scrollLive();
   renderView();
 })();
 </script>

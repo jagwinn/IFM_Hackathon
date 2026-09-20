@@ -98,7 +98,8 @@ class RunGraph:
                           why="You asked for an exact copy (/local-extract), which can be checked word for word locally.")
         self._attempt(node, 1)
 
-    def _on_call_finished(self, d, e):
+    def _node_for_call(self, d):
+        """The node a model call belongs to, by the step it was made for."""
         op, tier = d["operation"], d["tier"]
         if op == "attempt":
             node = self.nodes.get("triage")
@@ -114,9 +115,27 @@ class RunGraph:
             node = self._task_node(d["task_id"], tier)
         else:
             return
+        return node
+
+    def _on_call_output(self, d, e):
+        """Text the model has written so far, while the call is still running."""
+        node = self._node_for_call(d)
         if node is None:
             return
+        node["live"] = d.get("output", "")
+        self._attempt(node, d.get("attempt") or 1)["live"] = node["live"]
+
+    def _on_call_finished(self, d, e):
+        node = self._node_for_call(d)
+        if node is None:
+            return
+        op, tier = d["operation"], d["tier"]
+        node["live"] = None
         attempt = self._attempt(node, d.get("attempt") or 1)
+        attempt["live"] = None
+        if d.get("output"):
+            attempt["thinking"] = d["output"].get("thinking") or ""
+            attempt["text"] = d["output"].get("answer") or ""
         tokens = None
         if d.get("prompt_tokens") is not None and d.get("completion_tokens") is not None:
             tokens = d["prompt_tokens"] + d["completion_tokens"]

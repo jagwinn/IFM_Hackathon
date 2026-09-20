@@ -79,6 +79,23 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(g["route"], "cloud")
         self.assertEqual(result.metrics["local_calls"], 6)  # 0.9B and 4B answers, 2 local, 1 mid, 1 mid compare
 
+    async def test_live_output_then_thinking(self):
+        from horizon_relay.events import RelayEvent
+        graph = RunGraph()
+        await run_demo("trusted", emit=graph.aadd)
+        judge = graph.nodes["judge:local"]
+        graph.add(RelayEvent("r", 99, "call_output", "Model is writing", data={
+            "tier": "local", "operation": "solve", "task_id": None, "for_tier": "local", "attempt": 1,
+            "output": "Thinking about the report…"}))
+        self.assertEqual(judge["live"], "Thinking about the report…")
+        self.assertEqual(judge["attempts"][0]["live"], "Thinking about the report…")
+        graph.add(RelayEvent("r", 100, "call_finished", "done", data={
+            "tier": "local", "operation": "solve", "task_id": None, "for_tier": "local", "attempt": 1,
+            "outcome": "completed", "output": {"thinking": "Thinking about the report…", "answer": '{"answer": "x"}'}}))
+        self.assertIsNone(judge["live"])
+        self.assertEqual(judge["attempts"][0]["thinking"], "Thinking about the report…")
+        self.assertIn('"answer"', judge["attempts"][0]["text"])
+
     async def test_exact_extraction_graph(self):
         graph = RunGraph()
         await run_demo("local", emit=graph.aadd)

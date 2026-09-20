@@ -78,6 +78,45 @@ class LiveTests(unittest.IsolatedAsyncioTestCase):
         await provider.complete("cloud", "answer", {"task": "17*23"})
         self.assertNotIn("logprobs", seen[1])
 
+    async def test_streaming_reports_text_and_splits_thinking(self):
+        chunks = [{"choices": [{"delta": {"content": "Let me check the sentence. "}}]},
+                  {"choices": [{"delta": {"content": "</ifm|think_faster>"}}]},
+                  {"choices": [{"delta": {"content": '{"answer": "Detroit"'}, "logprobs": {"content": [
+                      {"token": "Detroit", "logprob": -0.01, "top_logprobs": []}]}}]},
+                  {"choices": [{"delta": {"content": ', "confidence": 0.9}'}, "finish_reason": "stop"}],
+                   "usage": {"prompt_tokens": 10, "completion_tokens": 7}}]
+        body = "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+        seen, live = [], []
+        def handler(request):
+            seen.append(json.loads(request.content))
+            return httpx.Response(200, content=body.encode(), headers={"content-type": "text/event-stream"})
+        reply = await self.provider(handler).complete("local", "solve", {"task": "city?"}, on_delta=live.append)
+        self.assertTrue(seen[0]["stream"])
+        self.assertEqual(len(live), 4)  # every chunk is reported as it arrives
+        self.assertEqual(reply.thinking, "Let me check the sentence.")
+        self.assertEqual(reply.text, '{"answer": "Detroit", "confidence": 0.9}')
+        self.assertEqual(reply.value, {"answer": "Detroit", "confidence": 0.9})
+        self.assertEqual((reply.prompt_tokens, reply.tokens[0]["t"]), (10, "Detroit"))
+
+    async def test_reasoning_effort_is_configurable(self):
+        seen = []
+        def handler(request):
+            seen.append(json.loads(request.content))
+            return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+        provider = OpenAICompatibleProvider(Endpoint("http://local/v1", "small", "", "", "high"),
+                                            Endpoint("https://cloud/v1", "large", "k"),
+                                            transport=httpx.MockTransport(handler))
+        await provider.complete("local", "solve", {"task": "x"})
+        await provider.complete("cloud", "answer", {"task": "x"})
+        self.assertEqual(seen[0]["chat_template_kwargs"], {"reasoning_effort": "high"})
+        self.assertNotIn("chat_template_kwargs", seen[1])
+
+    async def test_streaming_truncation_is_not_a_success(self):
+        body = 'data: {"choices": [{"delta": {"content": "partial"}, "finish_reason": "length"}]}\n\ndata: [DONE]\n\n'
+        provider = self.provider(lambda r: httpx.Response(200, content=body.encode()))
+        with self.assertRaisesRegex(RelayError, "token limit"):
+            await provider.complete("local", "solve", {"task": "x"}, on_delta=lambda _: None)
+
     async def test_truncation_is_not_a_success(self):
         provider = self.provider(lambda r: httpx.Response(200, json={"choices": [{"message": {"content": "partial"}, "finish_reason": "length"}]}))
         with self.assertRaisesRegex(RelayError, "token limit"):

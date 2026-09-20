@@ -35,6 +35,7 @@ def describe_device(device: dict | None, show_index: bool) -> str:
 
 class OpenAICompatibleProvider:
     simulated = False
+    streams = True  # complete() accepts on_delta and reports text as the model writes it
 
     def __init__(self, local: Endpoint, cloud: Endpoint, *, mid: Endpoint | None = None, transport=None):
         self.local, self.cloud, self.mid, self.transport = local, cloud, mid, transport
@@ -67,7 +68,8 @@ class OpenAICompatibleProvider:
                                             else describe_device(found.get(tier), show_index))
                 for tier, endpoint in self.endpoints.items()}
 
-    async def complete(self, tier, operation, payload):
+    async def complete(self, tier, operation, payload, on_delta=None):
+        """on_delta(text) is called with each chunk the model produces, reasoning included."""
         if tier not in self.endpoints:
             raise RelayError(f"No {tier} model is configured")
         endpoint = self.endpoints[tier]
@@ -76,9 +78,10 @@ class OpenAICompatibleProvider:
         structured = operation in ("attempt", "plan", "work", "solve", "critique")
         request = {"model": endpoint.model, "messages": prompts.messages(operation, payload),
                    "max_tokens": _max_tokens(tier, operation),
-                   "temperature": payload.get("temperature", 0.2), "stream": False}
+                   "temperature": payload.get("temperature", 0.2), "stream": bool(on_delta)}
+        if endpoint.reasoning_effort:
+            request["chat_template_kwargs"] = {"reasoning_effort": endpoint.reasoning_effort}
         if tier != "cloud":
-            request["chat_template_kwargs"] = {"reasoning_effort": "low"}
             if structured:
                 request["response_format"] = {"type": "json_object"}
             if operation == "solve":  # token probabilities feed the token_uncertainty signal
@@ -86,31 +89,24 @@ class OpenAICompatibleProvider:
         headers = {"Content-Type": "application/json"}
         if endpoint.key:
             headers["Authorization"] = "Bearer " + endpoint.key
+        url = endpoint.url.rstrip("/") + "/chat/completions"
         try:
             async with httpx.AsyncClient(timeout=120, transport=self.transport, follow_redirects=False) as client:
-                response = await client.post(endpoint.url.rstrip("/") + "/chat/completions", json=request, headers=headers)
+                if on_delta:
+                    content, reasoning, logprobs, finish, usage = await _read_stream(client, url, request, headers, tier, on_delta)
+                else:
+                    response = await client.post(url, json=request, headers=headers)
+                    if response.status_code != 200:
+                        # Provider error bodies may echo a request/credential. Never relay them to chat.
+                        raise RelayError(f"{tier.title()} model returned HTTP {response.status_code}; check endpoint configuration")
+                    content, reasoning, logprobs, finish, usage = _read_response(response, tier)
         except httpx.TimeoutException as exc:
             raise RelayError(f"{tier.title()} model timed out") from exc
         except httpx.HTTPError as exc:
             raise RelayError(f"Cannot connect to the {tier} model endpoint") from exc
-        if response.status_code != 200:
-            # Provider error bodies may echo a request/credential. Never relay them to chat.
-            raise RelayError(f"{tier.title()} model returned HTTP {response.status_code}; check endpoint configuration")
-        try:
-            data = response.json()
-            choice = data["choices"][0]
-            content = choice["message"].get("content")
-            if not isinstance(content, str) or not content.strip() or choice.get("finish_reason") == "length":
-                raise RelayError(f"{tier.title()} response was empty or reached its token limit")
-            usage = data.get("usage") or {}
-            if not isinstance(usage, dict):
-                usage = {}
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise RelayError(f"{tier.title()} endpoint returned an invalid completion") from exc
-        content = re.sub(r"^\s*<think>.*?</think>\s*", "", content, flags=re.S).strip()
-        # IFM's llama.cpp fork currently returns K2 reasoning inline, ending at
-        # this tokenizer marker instead of filling a separate reasoning field.
-        content = re.split(r"</ifm\|think(?:_[a-z]+)?>", content, maxsplit=1)[-1].strip()
+        if not isinstance(content, str) or not content.strip() or finish == "length":
+            raise RelayError(f"{tier.title()} response was empty or reached its token limit")
+        thinking, content = _split_thinking(content, reasoning)
         value = content
         if structured:
             clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", content).strip()
@@ -122,7 +118,8 @@ class OpenAICompatibleProvider:
         def count(name):
             value = usage.get(name)
             return value if type(value) is int and value >= 0 else None
-        return Reply(value, endpoint.model, count("prompt_tokens"), count("completion_tokens"), _token_logprobs(choice))
+        return Reply(value, endpoint.model, count("prompt_tokens"), count("completion_tokens"), logprobs,
+                     thinking=thinking, text=content)
 
 
 def _max_tokens(tier: str, operation: str) -> int:
@@ -131,6 +128,65 @@ def _max_tokens(tier: str, operation: str) -> int:
     if tier == "cloud":
         return 8192 if operation == "work" else 16384
     return 4096 if tier == "mid" else 2048
+
+
+def _read_response(response, tier) -> tuple[str, str, list | None, str | None, dict]:
+    """A complete (non-streaming) reply: (content, reasoning, token logprobs, finish reason, usage)."""
+    try:
+        data = response.json()
+        choice = data["choices"][0]
+        message = choice["message"]
+        usage = data.get("usage") or {}
+        return (message.get("content"), message.get("reasoning_content") or "", _token_logprobs(choice),
+                choice.get("finish_reason"), usage if isinstance(usage, dict) else {})
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise RelayError(f"{tier.title()} endpoint returned an invalid completion") from exc
+
+
+async def _read_stream(client, url, request, headers, tier, on_delta) -> tuple[str, str, list | None, str | None, dict]:
+    """Server-sent chunks, passed to on_delta as they arrive and assembled into the same five parts."""
+    content, reasoning, tokens, finish, usage = "", "", [], None, {}
+    async with client.stream("POST", url, json=request, headers=headers) as response:
+        if response.status_code != 200:
+            await response.aread()
+            raise RelayError(f"{tier.title()} model returned HTTP {response.status_code}; check endpoint configuration")
+        async for line in response.aiter_lines():
+            if not line.startswith("data:"):
+                continue
+            chunk = line[5:].strip()
+            if chunk == "[DONE]":
+                break
+            try:
+                event = json.loads(chunk)
+            except ValueError:
+                continue  # keep-alive or a partial line
+            if isinstance(event.get("usage"), dict):
+                usage = event["usage"]
+            for choice in event.get("choices") or []:
+                delta = choice.get("delta") or {}
+                finish = choice.get("finish_reason") or finish
+                tokens.extend((choice.get("logprobs") or {}).get("content") or [])
+                for key, text in (("reasoning_content", delta.get("reasoning_content")), ("content", delta.get("content"))):
+                    if isinstance(text, str) and text:
+                        if key == "content":
+                            content += text
+                        else:
+                            reasoning += text
+                        on_delta(text)
+    return content, reasoning, _token_logprobs({"logprobs": {"content": tokens}}), finish, usage
+
+
+def _split_thinking(content: str, reasoning: str = "") -> tuple[str, str]:
+    """(what the model reasoned, the answer it settled on). K2 writes its reasoning inline, ending at a
+    tokenizer marker, instead of filling a separate reasoning field."""
+    thinking = reasoning
+    match = re.match(r"\s*<think>(.*?)</think>\s*", content, flags=re.S)
+    if match:
+        thinking, content = (thinking + "\n" + match.group(1)).strip(), content[match.end():]
+    parts = re.split(r"</ifm\|think(?:_[a-z]+)?>", content, maxsplit=1)
+    if len(parts) == 2:
+        thinking, content = (thinking + "\n" + parts[0]).strip(), parts[1]
+    return thinking.strip(), content.strip()
 
 
 def _token_logprobs(choice) -> list | None:

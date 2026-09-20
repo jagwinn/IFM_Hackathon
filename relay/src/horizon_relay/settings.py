@@ -36,6 +36,7 @@ class Endpoint:
     model: str
     key: str = field(default="", repr=False)
     location: str = ""  # shown next to the model, e.g. "IFM API"; empty = detect (see OpenAICompatibleProvider.locations)
+    reasoning_effort: str = ""  # "low", "medium", "high" for models that take it; higher means more thinking to show
 
 
 @dataclass(frozen=True)
@@ -49,19 +50,23 @@ class RelaySettings:
     def from_env(cls, env: Mapping[str, str] | None = None) -> "RelaySettings":
         """LOCAL_BASE_URL, LOCAL_MODEL, LOCAL_API_KEY, CLOUD_BASE_URL, CLOUD_MODEL, CLOUD_API_KEY, CLOUD_ENABLED,
         optionally MID_BASE_URL, MID_MODEL, MID_API_KEY for a middle tier, and LOCAL_LOCATION, MID_LOCATION,
-        CLOUD_LOCATION to name where each model runs instead of detecting it."""
+        CLOUD_LOCATION to name where each model runs instead of detecting it, and RELAY_REASONING_EFFORT
+        (per model: LOCAL_/MID_/CLOUD_REASONING_EFFORT) for how much the models think before answering."""
         env = os.environ if env is None else env
+        effort = env.get("RELAY_REASONING_EFFORT", "low")
         mid = None
         if env.get("MID_BASE_URL"):
             mid = Endpoint(env["MID_BASE_URL"], env.get("MID_MODEL", "IFM/K2-Horizon-4B"), env.get("MID_API_KEY", ""),
-                           env.get("MID_LOCATION", ""))
+                           env.get("MID_LOCATION", ""), env.get("MID_REASONING_EFFORT", effort))
         return cls(
             Endpoint(env.get("LOCAL_BASE_URL", "http://model-runner.docker.internal/engines/v1"),
                      env.get("LOCAL_MODEL", "hf.co/IFM/K2-Horizon-0.9B-GGUF:BF16"),
-                     env.get("LOCAL_API_KEY", ""), env.get("LOCAL_LOCATION", "")),
+                     env.get("LOCAL_API_KEY", ""), env.get("LOCAL_LOCATION", ""),
+                     env.get("LOCAL_REASONING_EFFORT", effort)),
             Endpoint(env.get("CLOUD_BASE_URL", "https://api.ifm.ai/v1"),
                      env.get("CLOUD_MODEL", "IFM/K2-Horizon-375B-A23B"),
-                     env.get("CLOUD_API_KEY", ""), env.get("CLOUD_LOCATION", "")),
+                     env.get("CLOUD_API_KEY", ""), env.get("CLOUD_LOCATION", ""),
+                     env.get("CLOUD_REASONING_EFFORT", "")),
             Limits(call_timeout=120, run_timeout=480,
                    cloud_enabled=env.get("CLOUD_ENABLED", "true").lower() == "true"),
             mid,

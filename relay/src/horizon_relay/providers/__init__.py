@@ -18,6 +18,8 @@ class Reply:
     completion_tokens: int | None = None
     # Per-token log-probabilities when the provider supports them (see tokens.py); None otherwise.
     tokens: list | None = None
+    thinking: str = ""  # what the model reasoned before answering, when it exposes that
+    text: str = ""  # the answer as text, before any JSON parsing
 
 
 TIER_ORDER = ("local", "mid", "cloud")
@@ -26,6 +28,7 @@ TIER_ORDER = ("local", "mid", "cloud")
 class Provider(Protocol):
     simulated: bool  # scripted providers must say so; answers and events are then labeled
     models: dict[str, str]  # tier -> model name, for the tiers this provider serves (optional; default local+cloud)
+    streams: bool  # optional; True if complete() accepts on_delta(text) and reports text as it is written
 
     async def complete(self, tier: str, operation: str, payload: dict) -> Reply: ...
 

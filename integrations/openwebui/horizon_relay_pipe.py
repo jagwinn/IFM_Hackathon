@@ -19,7 +19,7 @@ from horizon_relay.evaluation import load_cases, run_case, select_cases, summari
 from horizon_relay.graph import RunGraph, render_html
 
 # Events that change what the decision graph shows. Each one re-sends the graph embed.
-GRAPH_UPDATES = {"local_skipped", "local_solve", "local_sample", "local_critique", "local_verdict", "extract_failed", "escalated",
+GRAPH_UPDATES = {"call_output", "local_skipped", "local_solve", "local_sample", "local_critique", "local_verdict", "extract_failed", "escalated",
                  "local_accepted", "answering", "plan_invalid", "plan_created", "task_started", "task_escalated",
                  "task_invalid", "task_completed", "synthesizing"}
 
