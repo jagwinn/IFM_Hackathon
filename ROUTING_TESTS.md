@@ -1,10 +1,10 @@
 # Routing tests
 
-The 25 labeled requests in [`relay/src/horizon_relay/fixtures/routing_tests.json`](relay/src/horizon_relay/fixtures/routing_tests.json). Each one has the model expected to answer it and, where there is one, the correct answer.
+The 27 labeled requests in [`relay/src/horizon_relay/fixtures/routing_tests.json`](relay/src/horizon_relay/fixtures/routing_tests.json). Each one has the model expected to answer it and, where there is one, the correct answer.
 
 Run them from Open WebUI with the **Horizon Relay Tests** model: send `/run all`, or a subset such as `/run 1 4 9`, `/run 0.9b`, `/run 4b`, `/run cloud` or `/run forced`. Each run first empties the **Tests** folder, then saves one chat per test there with its decision graph. From a terminal: `horizon-relay eval [selection]`.
 
-**Expected model** is the label in the test set; a test passes its route check when one of the listed models answers it. **Auto-checked** means the runner also checks the answer against a pattern. The others need a person to read the answer.
+**Expected model** is the label in the test set; a test passes its route check when one of the listed models answers it. **Auto-checked** means the runner also checks the answer against a pattern. The others need a person to read the answer. The delegation tests additionally require the run itself to hand work to the local models while the cloud works, which the runner checks from the recorded calls.
 
 ## 0.9B: short, literal, easily checked
 
@@ -43,10 +43,19 @@ Run them from Open WebUI with the **Horizon Relay Tests** model: send `/run all`
 | 21 | Alex and Blake repeatedly roll separate fair six-sided dice. Alex rolls first. The first player to roll a 6 wins, but after every complete round in which neither rolls a 6, Alex loses one future turn. Determine Alex's probability of eventually winning and explain your state model. | 375B | Ambiguous as written. If lost turns accumulate, Alex only ever rolls once, giving 1/6. Judge the reasoning and stated model. | – |
 | 22 | Plan a two-day prototype for a campus lost-and-found app. Compare two storage choices, suggest a minimal feature set, and identify the biggest implementation risks. | 375B | Open-ended; there is no single answer. It exercises cloud planning and delegation. | – |
 
+## Delegation: big goals the cloud should split up and hand out
+
+These check the behaviour rather than the answer: the cloud should keep the one hard piece, give the mechanical bulk to the local models, run them at the same time, and integrate the results. The runner records how many subtasks went to local models and how long local and cloud work overlapped, and marks the test ✗ if the work was never handed out.
+
+| # | Question | Expected model | Correct answer | Auto-checked |
+|---|---|---|---|---|
+| 23 | Build a small Python module for a library catalogue: design the data model and public API, then implement add_book, find_by_author, checkout and overdue_report, write a docstring for each, list the error cases, and explain how the pieces fit together. | 375B, delegating ≥ 2 subtasks to the local models, in parallel, ≤ 1 subtask kept on the cloud | Open-ended. The API design should come from the 375B while the local models write the individual functions and lists. | Delegation checked |
+| 24 | Write an onboarding guide for a new analyst at a climate research lab: decide the structure, then draft the sections (what the lab studies, meeting rhythm, data sources, who to ask), list day-one accounts, summarise field-station safety rules, and explain how the sections hang together. | 375B, same delegation requirements | Open-ended. The same shape without code: drafting and listing for the local models, the structural decision for the cloud. | Delegation checked |
+
 ## Forced paths: the policy is overridden so a specific route always runs
 
 | # | Question | Expected model | Correct answer | Auto-checked |
 |---|---|---|---|---|
-| 23 | What is 17 times 23? (the 0.9B's threshold is 0, so it is never trusted) | 4B | 391 | ✓ |
-| 24 | Same as #22 (no local answer is trusted; the cloud plans, delegates subtasks back to the local models, and synthesizes) | 375B | Open-ended | – |
-| 25 | Same as #16 (no local answer is trusted; the cloud answers in one call) | 375B | 13/27 | ✓ |
+| 25 | What is 17 times 23? (the 0.9B's threshold is 0, so it is never trusted) | 4B | 391 | ✓ |
+| 26 | Same as #22 (no local answer is trusted; the cloud plans, delegates subtasks back to the local models, and synthesizes) | 375B | Open-ended | – |
+| 27 | Same as #16 (no local answer is trusted; the cloud answers in one call) | 375B | 13/27 | ✓ |

@@ -76,6 +76,9 @@ async def evaluate(args):
         results.append(result)
         scores = " ".join(f"{t}={s:.2f}" for t, s in result.scores.items())
         answer = "" if result.correct is None else " answer " + ("correct" if result.correct else "WRONG")
+        if result.case.expects:
+            answer += f" delegated {result.local_subtasks}" + (f" ({result.parallel_ms}ms parallel)" if result.parallel_ms else "")
+            answer += "" if not result.unmet else " UNMET: " + "; ".join(result.unmet)
         print(f"    -> {result.route} {'OK' if result.matched else 'MISMATCH'}{answer} {scores} {result.elapsed_s}s"
               + (f" error: {result.error}" if result.error else ""), file=sys.stderr)
         if args.graph_dir:

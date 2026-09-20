@@ -4,7 +4,7 @@ The default set is fixtures/routing_tests.json. Each case has name, category, di
 expected_route: the tiers that may answer it ("local" is the smallest model, then "mid", then "cloud"),
 as a list or one string ("either" allows any). Optional: answer_pattern, a case-insensitive regular
 expression the answer must match; policy, RoutingPolicy overrides for that case (to force a path);
-note, why the case exists.
+expects, what the run itself must show (see check_expectations); note, why the case exists.
 """
 
 from dataclasses import asdict, dataclass, field
@@ -30,6 +30,7 @@ class TestCase:
     prompt: str
     answer_pattern: str | None = None
     policy: dict | None = None
+    expects: dict | None = None  # local_subtasks_at_least, cloud_subtasks_at_most, parallel_work
     note: str = ""
 
 
@@ -44,6 +45,10 @@ class CaseResult:
     scores: dict = field(default_factory=dict)  # tier -> combined routing score
     local_calls: int = 0
     cloud_calls: int = 0
+    local_subtasks: int = 0  # subtasks the cloud delegated back to local models
+    cloud_subtasks: int = 0
+    parallel_ms: int = 0  # how long local and cloud subtasks ran at the same time
+    unmet: list = field(default_factory=list)  # expectations from the case that the run did not meet
     error: str = ""
     graph: dict = field(default_factory=dict)
 
@@ -65,7 +70,7 @@ def load_cases(path: str | Path | None = None) -> list[TestCase]:
     cases = []
     for c in json.loads(text):
         case = TestCase(c["name"], c.get("category", ""), c.get("difficulty", ""), _expected(c["expected_route"]),
-                        c["prompt"], c.get("answer_pattern"), c.get("policy"), c.get("note", ""))
+                        c["prompt"], c.get("answer_pattern"), c.get("policy"), c.get("expects"), c.get("note", ""))
         if case.answer_pattern:
             re.compile(case.answer_pattern)
         cases.append(case)
@@ -109,10 +114,42 @@ async def run_case(relay, case: TestCase, emit=None) -> CaseResult:
     metrics = result.metrics
     route = metrics.get("route") or "cloud"
     correct = bool(re.search(case.answer_pattern, result.content, re.I)) if case.answer_pattern else None
-    return CaseResult(case, route, route in case.expected_route, round(time.monotonic() - start, 2), correct,
-                      answer=result.content,
-                      scores={v["tier"]: v["signals"]["combined_score"] for v in metrics.get("verdicts", [])},
-                      local_calls=metrics["local_calls"], cloud_calls=metrics["cloud_calls"], graph=graph.to_dict())
+    local_subtasks, cloud_subtasks, parallel_ms = delegation(metrics)
+    case_result = CaseResult(case, route, route in case.expected_route, round(time.monotonic() - start, 2), correct,
+                             answer=result.content,
+                             scores={v["tier"]: v["signals"]["combined_score"] for v in metrics.get("verdicts", [])},
+                             local_calls=metrics["local_calls"], cloud_calls=metrics["cloud_calls"],
+                             local_subtasks=local_subtasks, cloud_subtasks=cloud_subtasks, parallel_ms=parallel_ms,
+                             graph=graph.to_dict())
+    case_result.unmet = check_expectations(case, case_result)
+    return case_result
+
+
+def delegation(metrics: dict) -> tuple[int, int, int]:
+    """(local subtasks, cloud subtasks, milliseconds where local and cloud subtasks overlapped)."""
+    work = [c for c in metrics.get("calls", []) if c["operation"] == "work" and c.get("started_ms") is not None]
+    spans = {"local": [], "cloud": []}
+    for call in work:
+        start = call["started_ms"]
+        spans["cloud" if call["tier"] == "cloud" else "local"].append((start, start + (call["elapsed_ms"] or 0)))
+    overlap = sum(max(0, min(a[1], b[1]) - max(a[0], b[0])) for a in spans["local"] for b in spans["cloud"])
+    tasks = {c["task_id"]: c["tier"] for c in work}
+    local = sum(tier != "cloud" for tier in tasks.values())
+    return local, len(tasks) - local, overlap
+
+
+def check_expectations(case: TestCase, result: "CaseResult") -> list[str]:
+    """What the case demanded of the run itself and did not get."""
+    unmet, expects = [], case.expects or {}
+    least = expects.get("local_subtasks_at_least")
+    if least is not None and result.local_subtasks < least:
+        unmet.append(f"delegated {result.local_subtasks} subtasks to local models, expected at least {least}")
+    most = expects.get("cloud_subtasks_at_most")
+    if most is not None and result.cloud_subtasks > most:
+        unmet.append(f"kept {result.cloud_subtasks} subtasks on the cloud, expected at most {most}")
+    if expects.get("parallel_work") and result.parallel_ms <= 0:
+        unmet.append("local and cloud subtasks never ran at the same time")
+    return unmet
 
 
 def summarize(results: list[CaseResult]) -> dict:
@@ -123,6 +160,9 @@ def summarize(results: list[CaseResult]) -> dict:
         "matched": sum(r.matched for r in results),
         "answers_checked": len(checked),
         "answers_correct": sum(bool(r.correct) for r in checked),
+        "expectations_checked": sum(bool(r.case.expects) for r in results),
+        "expectations_met": sum(bool(r.case.expects) and not r.unmet for r in results),
+        "delegated_subtasks": sum(r.local_subtasks for r in results),
         "errors": len(results) - len(done),
         "by_tier": {tier: sum(r.route == tier for r in done) for tier in TIERS},
         "cloud_calls": sum(r.cloud_calls for r in results),

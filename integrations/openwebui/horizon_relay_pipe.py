@@ -292,6 +292,10 @@ class Pipe:
             link = ""
             if user_id:
                 check = "" if result.correct is None else f" Answer check: {'passed' if result.correct else 'failed'}."
+                if result.case.expects:
+                    check += (f" Delegation: {result.local_subtasks} subtasks to local models"
+                              + (f", {result.parallel_ms / 1000:.0f}s alongside the cloud" if result.parallel_ms else "")
+                              + ("." if not result.unmet else f". Unmet: {'; '.join(result.unmet)}."))
                 content = (result.answer + "\n\n---\n" + f"Expected **{expected(case)}**, routed to **{names.get(result.route, result.route)}**.{check}"
                            if result.route != "error" else f"**Relay stopped — no complete answer.** {result.error}")
                 chat_id = await self.chats.save_chat(
@@ -307,14 +311,22 @@ class Pipe:
             scores = " · ".join(f"{names.get(t, t)} {s:.2f}" for t, s in r.scores.items()) or "–"
             route = names.get(r.route, r.route)
             answer = "–" if r.correct is None else "✓" if r.correct else "✗"
+            delegated = "–" if not r.local_subtasks and not r.case.expects else f"{r.local_subtasks} local"
+            if r.parallel_ms:
+                delegated += f", {r.parallel_ms / 1000:.0f}s in parallel"
+            if r.unmet:
+                delegated += " ✗"
             rows.append(f"| {i} | {r.case.name} | {expected(r.case)} | {route} | {'✓' if r.matched else '✗'} | {answer} | "
-                        f"{scores} | {r.cloud_calls} | {r.elapsed_s:.1f}s | {link} |")
+                        f"{delegated} | {scores} | {r.cloud_calls} | {r.elapsed_s:.1f}s | {link} |")
         tiers = " · ".join(f"{names.get(t, t)} {n}" for t, n in summary["by_tier"].items() if n)
+        expectations = (f" · **{summary['expectations_met']}/{summary['expectations_checked']} delegation checks passed**"
+                        if summary["expectations_checked"] else "")
         return (f"**{summary['matched']}/{summary['cases']} routed as expected** · "
-                f"**{summary['answers_correct']}/{summary['answers_checked']} answers correct** · answered by {tiers or 'none'} · "
-                f"{summary['errors']} errors · {summary['cloud_calls']} cloud calls · {summary['seconds']}s\n\n"
-                "| # | Test | Expected | Routed to | Route | Answer | Scores | Cloud calls | Time | Chat |\n"
-                "|---|---|---|---|---|---|---|---|---|---|\n" + "\n".join(rows)
+                f"**{summary['answers_correct']}/{summary['answers_checked']} answers correct**{expectations} · "
+                f"answered by {tiers or 'none'} · {summary['errors']} errors · {summary['cloud_calls']} cloud calls · "
+                f"{summary['seconds']}s\n\n"
+                "| # | Test | Expected | Routed to | Route | Answer | Delegated | Scores | Cloud calls | Time | Chat |\n"
+                "|---|---|---|---|---|---|---|---|---|---|---|\n" + "\n".join(rows)
                 + (f"\n\nEach test is saved in **{TESTS_FOLDER}** in the sidebar with its decision graph." if user_id else ""))
 
     async def demo(self, body, task, emit):

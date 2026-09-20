@@ -8,8 +8,8 @@ from typing import Mapping
 
 @dataclass(frozen=True)
 class Limits:
-    max_tasks: int = 6
-    local_concurrency: int = 1
+    max_tasks: int = 8  # a large goal can be split into more pieces than a small one
+    local_concurrency: int = 2  # local subtasks running at once, alongside whatever the cloud is doing
     cloud_calls: int = 5  # includes planning and the final synthesis
     cloud_worker_calls: int = 2  # subtasks that escalated to the cloud
     cloud_enabled: bool = True
@@ -21,8 +21,8 @@ class Limits:
             value = getattr(self, name)
             if type(value) is not int or value < (1 if name in ("max_tasks", "local_concurrency") else 0):
                 raise ValueError(f"Invalid limit: {name}")
-        if self.max_tasks > 6 or self.local_concurrency > 2:
-            raise ValueError("Prototype supports at most 6 tasks and 2 local workers")
+        if self.max_tasks > 12 or self.local_concurrency > 4:
+            raise ValueError("Prototype supports at most 12 tasks and 4 local workers")
         for name in ("call_timeout", "run_timeout"):
             value = getattr(self, name)
             if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:

@@ -219,6 +219,36 @@
     "prompt": "Plan a two-day prototype for a campus lost-and-found app. Compare two storage choices, suggest a minimal feature set, and identify the biggest implementation risks."
   },
   {
+    "name": "Coding project delegation",
+    "category": "delegation",
+    "difficulty": "hard",
+    "expected_route": [
+      "cloud"
+    ],
+    "prompt": "Build a small Python module for a library catalogue. Design the data model and the public API, then implement these functions: add_book(title, author, isbn), find_by_author(author), checkout(isbn, member_id) and overdue_report(today). Write a one-line docstring for each, list the error cases each function must handle, and explain how the pieces fit together.",
+    "expects": {
+      "local_subtasks_at_least": 2,
+      "cloud_subtasks_at_most": 1,
+      "parallel_work": true
+    },
+    "note": "A large goal with mechanical bulk (write these functions, list error cases) and one hard piece (the data model and API). The local models should get the bulk while the cloud designs, and the answer integrates both."
+  },
+  {
+    "name": "Onboarding guide delegation",
+    "category": "delegation",
+    "difficulty": "hard",
+    "expected_route": [
+      "cloud"
+    ],
+    "prompt": "Write an onboarding guide for a new analyst joining a small climate research lab. Decide the structure of the guide first, then draft these sections: what the lab studies, the weekly meeting rhythm, the data sources the team uses, and who to ask for what. List the accounts a newcomer needs on day one, summarise the safety rules for the field station, and explain how the sections hang together.",
+    "expects": {
+      "local_subtasks_at_least": 2,
+      "cloud_subtasks_at_most": 1,
+      "parallel_work": true
+    },
+    "note": "The same shape without code: several drafting and listing tasks a small model can do from a stated outline, plus one structural decision for the cloud."
+  },
+  {
     "name": "Forced: 0.9B escalates to 4B",
     "category": "forced path",
     "difficulty": "easy",

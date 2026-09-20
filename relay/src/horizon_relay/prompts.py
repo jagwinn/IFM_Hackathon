@@ -50,9 +50,17 @@ TIER_GUIDE = {
     "cloud": '"cloud": the large model. Only for work the local models cannot do; at most one cloud task.',
 }
 
-PLAN = '''Decompose the user's goal into 2-4 focused subtasks, assigning each to the smallest model that can do it well.
+PLAN = '''Split the user's goal so that the models can work on it at the same time, then be integrated.
 Only split work that is genuinely separable. If the goal is one question, one derivation or one chain of reasoning,
 do not split it: return a single task on the "cloud" tier and let the final answer come from it.
+
+For a large goal, hand the local models the mechanical, self-contained bulk: writing functions to a stated
+signature, drafting sections to a stated outline, listing, extracting, classifying, reformatting, filling in
+routine cases. Keep the one genuinely hard piece - the design, the tricky reasoning, the part everything else
+depends on - on the cloud tier, and give those tasks empty depends_on so they run while the local models work.
+Say in each instruction exactly what the worker must produce, since it cannot see the other tasks. Add a task
+that depends on another only when it truly needs that result. The final instruction integrates the pieces.
+
 Available tiers, smallest first:
 {tiers}
 Return ONLY a JSON object with exactly version (integer 2), tasks (array), final_instruction (string).
@@ -65,7 +73,8 @@ input_refs: list of "sources.KEY" from supplied sources or "results.TASK_ID" fro
 depends_on: list of other task IDs (no cycles);
 result_type: "task_answer";
 checks: ["required_fields"].
-At least two tasks should run on local tiers. A task_answer worker returns {"answer":"..."}.
+Put as much of the bulk on local tiers as the work allows; at most one cloud task.
+A task_answer worker returns {"answer":"..."}.
 Do not ask workers to browse, run code, call tools, or take external actions: they can reason over supplied text only.
 Preserve conversation constraints. Avoid redundant tasks. Plan a later task that uses previous results when useful.
 local_attempts shows what the local models answered and why the router did not trust them; plan around those weaknesses.

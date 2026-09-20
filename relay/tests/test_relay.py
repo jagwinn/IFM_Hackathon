@@ -108,6 +108,37 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cloud_work, ["extract_report_1"])
         self.assertIn("token limit", [e.data.get("error", "") for e in events if e.name == "task_invalid"][0])
 
+    async def test_local_bulk_runs_while_the_cloud_works_on_the_hard_part(self):
+        """A large goal: the cloud keeps the hard piece and the local models do the bulk at the same time."""
+        class BigJob(SimulatedProvider):
+            async def complete(self, tier, operation, payload):
+                if operation == "plan":
+                    tasks = [{"id": f"write_{name}", "instruction": f"Implement {name}()", "preferred_tier": "local",
+                              "why": "Mechanical, to a stated signature", "input_refs": ["sources.report_1"],
+                              "depends_on": [], "result_type": "task_answer", "checks": ["required_fields"]}
+                             for name in ("parse", "format", "validate")]
+                    tasks.append({"id": "design_api", "instruction": "Design the module API", "preferred_tier": "cloud",
+                                  "why": "The hard piece", "input_refs": ["sources.report_1"], "depends_on": [],
+                                  "result_type": "task_answer", "checks": ["required_fields"]})
+                    return Reply({"version": 2, "tasks": tasks, "final_instruction": "Integrate the pieces"}, "large")
+                if operation == "work":
+                    await asyncio.sleep(0.2 if tier == "cloud" else 0.05)
+                    return Reply({"answer": f'{payload["task"]["id"]} done'}, tier)
+                if operation == "synthesize":
+                    return Reply("Integrated module", "large")
+                return await super().complete(tier, operation, payload)
+
+        result, _ = await self.run_demo(provider=BigJob(), limits=Limits(local_concurrency=2, cloud_worker_calls=1))
+        work = [c for c in result.metrics["calls"] if c["operation"] == "work"]
+        self.assertEqual(len(work), 4)
+        cloud = next(c for c in work if c["tier"] == "cloud")
+        local = [c for c in work if c["tier"] != "cloud"]
+        overlap = sum(max(0, min(c["started_ms"] + c["elapsed_ms"], cloud["started_ms"] + cloud["elapsed_ms"])
+                          - max(c["started_ms"], cloud["started_ms"])) for c in local)
+        self.assertGreater(overlap, 0, "local subtasks should run while the cloud works on the hard part")
+        self.assertLess(max(c["started_ms"] for c in local), cloud["started_ms"] + cloud["elapsed_ms"])
+        self.assertIn("Integrated module", result.content)
+
     async def test_cloud_worker_budget(self):
         with self.assertRaises(BudgetError):
             await self.run_demo("escalate", Limits(cloud_worker_calls=0))

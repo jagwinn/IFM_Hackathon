@@ -299,7 +299,8 @@ class _Run:
         record = {"tier": tier, "operation": operation, "task_id": task.get("id") if isinstance(task, dict) else None,
                   "attempt": payload.get("attempt"), "for_tier": payload.get("for_tier"), "model": None, "prompt_tokens": None,
                   "completion_tokens": None, "outcome": "started", "elapsed_ms": 0, "judgment": None,
-                  "token_stats": None, "output": None}
+                  "token_stats": None, "output": None,
+                  "started_ms": round((time.monotonic() - self.started) * 1000)}
         self.calls.append(record)
         start = time.monotonic()
         live = {"text": "", "shown": 0}
