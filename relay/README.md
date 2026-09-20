@@ -133,7 +133,7 @@ thinking to show), or per model with `LOCAL_REASONING_EFFORT`, `MID_REASONING_EF
 - `horizon-relay eval [selection]` runs them and reports route and answer accuracy (`--graph-dir` saves each graph). In Open WebUI the **Horizon Relay Tests** model does the same with `/run` and saves one chat per test in the **Tests** folder.
 - `horizon-relay tune` has both local models answer every test with escalation forced and the cloud off (no cloud calls), saves those profiles, and searches weights, thresholds and rules against the labels, penalizing any setting that would return a wrong local answer. `--reuse` re-searches saved profiles offline in seconds.
 
-The current defaults came from that search: 20 of 22 tests routed as labeled, up from 12, with 2 wrong local answers instead of 6. Twenty-odd tests guide the settings; they do not validate them. Re-tune after changing models or prompts.
+The current defaults came from that search: 20 of 22 tests routed as labeled, up from 12, and one wrong local answer returned instead of six. The token-uncertainty rule does most of that work, catching answers the local critic waved through; it ignores answers shorter than three tokens, where one hesitant token ("positive" against "Positive") would otherwise look like doubt. Twenty-odd tests guide the settings; they do not validate them. Re-tune after changing models or prompts.
 
 ## Command line
 

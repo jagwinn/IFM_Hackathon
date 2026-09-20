@@ -115,6 +115,17 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         easy = await relay.chat([{"role": "user", "content": "Capital of France?"}])
         self.assertEqual(easy.metrics["skipped"], [])
 
+    async def test_token_rule_ignores_very_short_answers(self):
+        from horizon_relay.policy import Signals, Verdict, token_uncertainty_at_least
+        rule = token_uncertainty_at_least(0.12, min_tokens=3)
+        def verdict(tokens):
+            sample = Assessment("positive", 0.95, "t", "low", False, "", token_prob=0.7,
+                                token_stats={"count": tokens, "prob": 0.7})
+            signals = Signals(0.05, 0.3, 0.0, 0.0, 0.05, 0.0, 0.1)
+            return Verdict("local", (sample,), Critique(True, 0.0, ""), signals, 0.5, False, "")
+        self.assertIsNone(rule(verdict(1)))  # one hesitant token is not doubt about the answer
+        self.assertTrue(rule(verdict(6)))
+
     async def test_direct_cloud_mode(self):
         calls = []
         class Recorder(SimulatedProvider):

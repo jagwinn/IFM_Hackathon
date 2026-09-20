@@ -41,6 +41,7 @@ async def profile_case(relay, case: TestCase) -> dict:
         answer = v["samples"][0]["answer"]
         tiers[tier] = {
             "signals": {k: v["signals"][k] for k in SIGNAL_KEYS},
+            "answer_tokens": max(((s.get("token_stats") or {}).get("count") or 0) for s in v["samples"]),
             "requested": any(s["needs_escalation"] for s in v["samples"]),
             "empty": not answer.strip(),
             "critic": {k: v["critique"][k] for k in ("passed", "severity", "skipped")},
@@ -89,7 +90,8 @@ def simulate(params: dict, prof: dict, combine=None) -> str:
                 and critic["severity"] >= params["critic_min"]:
             continue
         token = t["signals"].get("token_uncertainty")
-        if tier == "local" and params.get("token_max") is not None and token is not None and token >= params["token_max"]:
+        if (tier == "local" and params.get("token_max") is not None and token is not None
+                and token >= params["token_max"] and t.get("answer_tokens", 0) >= params.get("token_min_length", 1)):
             continue
         if combine(t["signals"]) < params["thresholds"][tier]:
             return tier
@@ -121,12 +123,13 @@ def search(profiles: list[dict]) -> list[tuple[dict, dict]]:
     ranked = []
     for values in itertools.product(*grid.values()):
         weights = dict(zip(grid, values))
-        for local_t, mid_t, critic_min, skip, token_max in itertools.product(
-                thresholds, thresholds, (None, 0.5), (None, 0.3), (None, 0.10, 0.12, 0.15, 0.20)):
+        for local_t, mid_t, critic_min, token_max, token_min_length in itertools.product(
+                thresholds, thresholds, (None, 0.5), (None, 0.10, 0.12, 0.15, 0.20), (1, 3, 5)):
+            skip = None
             if not local_t <= mid_t + 0.1:
                 continue  # the smallest model should not be trusted much more easily than the larger one
             params = {"weights": weights, "thresholds": {"local": local_t, "mid": mid_t}, "critic_min": critic_min,
-                      "skip_small_above": skip, "token_max": token_max}
+                      "skip_small_above": skip, "token_max": token_max, "token_min_length": token_min_length}
             result = evaluate(params, profiles)
             distance = sum(abs(weights[k] - WEIGHTS[k]) for k in weights) + abs(local_t - 0.5) + abs(mid_t - 0.5)
             ranked.append((result["objective"], -result["cloud"], -distance, params, result))

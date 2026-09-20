@@ -106,7 +106,8 @@ async def tune(args):
     current = {"weights": dict(policy.weights), "thresholds": {t: policy.threshold(t) for t in ("local", "mid")},
                "critic_min": rule_limit("escalate_when_critic_rejects", "min_severity"),
                "skip_small_above": policy.skip_small_above,
-               "token_max": rule_limit("escalate_when_tokens_are_uncertain", "limit")}
+               "token_max": rule_limit("escalate_when_tokens_are_uncertain", "limit"),
+               "token_min_length": rule_limit("escalate_when_tokens_are_uncertain", "min_tokens") or 1}
     ranked = search(profiles)
     best_params, best = ranked[0]
     report = {"current": {"params": current, "result": evaluate(current, profiles)},

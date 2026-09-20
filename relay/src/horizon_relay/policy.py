@@ -14,7 +14,8 @@ Each local model, smallest first, answers the request itself and judges its own 
 The score is the weighted mean of the signals that are available (weights are relative).
 
 Defaults were tuned with `horizon-relay tune` on the built-in routing tests (K2-Horizon 0.9B and 4B on an
-RTX 3070): 20 of 22 tests routed as labeled, against 12 of 22 before tuning. Re-tune when models change.
+RTX 3070): 20 of 22 tests routed as labeled and one wrong local answer returned, against 12 of 22 and six
+wrong answers before tuning. Re-tune when models change.
 
 `rules` run first and may force a decision; otherwise a score at or above the tier's threshold
 escalates to the next model up. Requests whose task_complexity reaches `skip_small_above` skip the
@@ -104,13 +105,20 @@ def reject_empty_answers(verdict: Verdict) -> bool | None:
     return True if not verdict.answer.strip() else None
 
 
-def token_uncertainty_at_least(limit: float, tiers: tuple[str, ...] = ("local",)) -> Rule:
+def token_uncertainty_at_least(limit: float, tiers: tuple[str, ...] = ("local",), min_tokens: int = 3) -> Rule:
     """Escalate when the model hesitated over the tokens of its own answer. On the smallest model this
-    separates easy requests (token uncertainty up to ~0.07) from everything harder (~0.19 and up)."""
+    separates easy requests (token uncertainty up to ~0.07) from everything harder (~0.19 and up).
+
+    Answers shorter than `min_tokens` are left to the score: in a one-word answer a single hesitant token
+    ("positive" against "Positive") swings the whole measure without meaning the model is unsure."""
     def escalate_when_tokens_are_uncertain(verdict: Verdict) -> bool | None:
         value = verdict.signals.token_uncertainty
-        return True if verdict.tier in tiers and value is not None and value >= limit else None
+        tokens = max((s.token_stats or {}).get("count", 0) for s in verdict.samples)
+        if verdict.tier in tiers and value is not None and value >= limit and tokens >= min_tokens:
+            return True
+        return None
     escalate_when_tokens_are_uncertain.limit = limit
+    escalate_when_tokens_are_uncertain.min_tokens = min_tokens
     return escalate_when_tokens_are_uncertain
 
 
