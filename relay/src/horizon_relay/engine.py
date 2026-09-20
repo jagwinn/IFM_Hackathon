@@ -16,7 +16,8 @@ from .budget import CloudBudget
 from .errors import BudgetError, RelayError, ValidationError
 from .events import EventCallback, RelayEvent
 from .plan import Plan
-from .policy import Critique, RoutingPolicy, answer_exact_extraction, read_assessment, read_critique, task_complexity
+from .policy import (Critique, RoutingPolicy, answer_exact_extraction, read_assessment, read_critique,
+                     request_parts, task_complexity)
 from .providers import Provider, Reply, available_tiers
 from .results import split_judgment, validate_result
 from .settings import Limits
@@ -132,9 +133,11 @@ class _Run:
         self.route = "cloud"
         context = [{"tier": v.tier, "model": self.models.get(v.tier, v.tier), "answer": v.answer[:4000],
                     "reason": f"{v.reason}. Critic: {v.critique.critique}"} for v in self.verdicts]
+        plans = self.policy.plans(text)
         await self.event("escalated", "Local answers not trusted; the cloud takes over", tier="cloud",
-                         mode=self.policy.cloud_mode, reason=self.verdicts[-1].reason if self.verdicts else None)
-        if self.policy.cloud_mode == "direct":
+                         mode="plan" if plans else "direct", parts=request_parts(text), length=len(text),
+                         reason=self.verdicts[-1].reason if self.verdicts else None)
+        if not plans:
             await self.event("answering", "Cloud model answering", tier="cloud")
             answer = await self.call("cloud", "answer", {"task": text, "local_attempts": context})
             if not isinstance(answer, str) or not answer.strip():

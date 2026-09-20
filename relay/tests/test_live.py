@@ -205,7 +205,9 @@ class LiveTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(body["model"], "small")
                     value = {"answer": "A bounded analysis of the supplied text.", "confidence": "high", "concern": ""}
             return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(value) if isinstance(value, dict) else value}}]})
-        result = await RelayEngine(self.provider(handler)).run("Analyze this", {"conversation": "user: Analyze this"})
+        from horizon_relay import RoutingPolicy
+        result = await RelayEngine(self.provider(handler), policy=RoutingPolicy(cloud_mode="plan")).run(
+            "Analyze this", {"conversation": "user: Analyze this"})
         self.assertEqual(operations, ["solve", "solve", "critique", "plan", "work", "work", "synthesize"])
         self.assertEqual(temperatures, [0.25, 0.4])
         self.assertEqual(result.metrics["route"], "cloud")

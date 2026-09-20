@@ -51,6 +51,8 @@ TIER_GUIDE = {
 }
 
 PLAN = '''Decompose the user's goal into 2-4 focused subtasks, assigning each to the smallest model that can do it well.
+Only split work that is genuinely separable. If the goal is one question, one derivation or one chain of reasoning,
+do not split it: return a single task on the "cloud" tier and let the final answer come from it.
 Available tiers, smallest first:
 {tiers}
 Return ONLY a JSON object with exactly version (integer 2), tasks (array), final_instruction (string).

@@ -34,6 +34,7 @@ class RunGraph:
         self.task_lane: dict[str, str] = {}  # task_id -> tier the planner assigned
         self.accepted: dict[str, str] = {}  # task_id -> node that produced the accepted result
         self.final_instruction = ""  # the planner's instruction for the final answer
+        self.direct_reason = ""  # why the cloud answered instead of planning
         self.metrics = None
         self.route = None  # the tier whose answer was returned, once the run completes
 
@@ -220,6 +221,10 @@ class RunGraph:
             self.nodes["triage"].update(status="answered", result=e.message)
 
     def _on_escalated(self, d, e):
+        if d.get("mode") == "direct" and d.get("parts") is not None:
+            self.direct_reason = (f'No local answer was trusted. The request asks for {d["parts"]} thing'
+                                  f'{"s" if d["parts"] != 1 else ""} in {d["length"]} characters, too little to be worth '
+                                  "splitting into subtasks, so the large model answers it itself.")
         source = next((n for n in reversed(list(self.nodes.values())) if n.get("kind") in ("judge", "triage")), None)
         target = self._answer_node(direct=True) if d.get("mode") == "direct" else self._plan_node()
         target["status"] = "running"
@@ -240,8 +245,7 @@ class RunGraph:
         if direct:
             return self._node("answer", kind="answer", lane="cloud", round=last, title="Answer in the cloud", by=POLICY,
                               instruction="Solve the original request, using the local attempts only as clues.",
-                              why=("No local answer was trusted, and the policy sends such requests straight to the "
-                                   "large model (cloud_mode=direct)."))
+                              why=(self.direct_reason or "No local answer was trusted, so the large model answers."))
         return self._node("answer", kind="answer", lane="cloud", round=last + 1, title="Write the answer", by=POLICY,
                           instruction=self.final_instruction or "Answer the original request from the checked subtask results.",
                           inputs=[f"Result of {n['title']}" for n in self.nodes.values() if n.get("kind") == "task"]

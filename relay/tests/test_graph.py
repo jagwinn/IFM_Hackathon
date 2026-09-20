@@ -37,7 +37,8 @@ class ThreeTiers(SimulatedProvider):
 class GraphTests(unittest.IsolatedAsyncioTestCase):
     async def test_escalation_ladder_and_delegation(self):
         graph = RunGraph()
-        result = await Relay(ThreeTiers()).chat([{"role": "user", "content": "Compare two options"}], emit=graph.aadd)
+        result = await Relay(ThreeTiers(), policy=RoutingPolicy(cloud_mode="plan")).chat(
+            [{"role": "user", "content": "Compare two options"}], emit=graph.aadd)
         g = graph.to_dict()
         nodes = {n["id"]: n for n in g["nodes"]}
         self.assertEqual([lane["id"] for lane in g["lanes"]], ["local", "mid", "cloud"])
@@ -125,7 +126,8 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_failed_run_stops_nodes(self):
         graph = RunGraph()
-        relay = Relay(SimulatedProvider("escalate"), policy=RoutingPolicy(escalate_failed_local_tasks=False))
+        relay = Relay(SimulatedProvider("escalate"),
+                      policy=RoutingPolicy(escalate_failed_local_tasks=False, cloud_mode="plan"))
         with self.assertRaises(Exception):
             await relay.run("Goal", {"report_1": "a", "report_2": "b"}, emit=graph.aadd)
         g = graph.to_dict()

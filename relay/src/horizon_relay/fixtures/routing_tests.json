@@ -247,7 +247,7 @@
       "cloud_mode": "plan",
       "tier_thresholds": {}
     },
-    "note": "No local answer is trusted; the cloud plans, delegates subtasks back to local models, and synthesizes."
+    "note": "No local answer is trusted and the request has several separable parts, so the cloud plans, delegates subtasks back to the local models, and synthesizes."
   },
   {
     "name": "Forced: cloud answers directly",
@@ -263,6 +263,6 @@
       "cloud_mode": "direct",
       "tier_thresholds": {}
     },
-    "note": "No local answer is trusted; the cloud answers in one call."
+    "note": "No local answer is trusted; one question, so the cloud answers it in a single call."
   }
 ]

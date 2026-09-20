@@ -68,7 +68,7 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metrics["route"], "cloud")
 
     async def test_custom_rule_can_keep_work_local(self):
-        policy = RoutingPolicy(rules=(lambda verdict: False,))
+        policy = RoutingPolicy(rules=(lambda verdict: False,), cloud_mode="plan")
         result = await Relay(SimulatedProvider(), policy=policy).run("Prioritize", demo_sources())
         self.assertEqual((result.metrics["route"], result.metrics["cloud_calls"]), ("local", 0))
 
@@ -126,6 +126,28 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(rule(verdict(1)))  # one hesitant token is not doubt about the answer
         self.assertTrue(rule(verdict(6)))
 
+    def test_planning_only_pays_off_for_several_parts(self):
+        policy = RoutingPolicy()
+        campus = ("Plan a two-day prototype for a campus lost-and-found app. Compare two storage choices, suggest a "
+                  "minimal feature set, and identify the biggest implementation risks.")
+        puzzle = ("You have 12 visually identical balls, one of a different weight. Using a balance scale exactly "
+                  "three times, give a strategy that always identifies the odd ball and whether it is heavier.")
+        self.assertTrue(policy.plans(campus))  # four separable deliverables
+        self.assertFalse(policy.plans(puzzle))  # one chain of reasoning
+        self.assertFalse(policy.plans("What is 17 times 23?"))
+        self.assertTrue(RoutingPolicy(cloud_mode="plan").plans("What is 17 times 23?"))
+        self.assertFalse(RoutingPolicy(cloud_mode="direct").plans(campus))
+
+    async def test_short_requests_are_answered_not_split(self):
+        calls = []
+        class Recorder(SimulatedProvider):
+            async def complete(self, tier, operation, payload):
+                calls.append(operation)
+                return await super().complete(tier, operation, payload)
+        result = await Relay(Recorder()).chat([{"role": "user", "content": "Prove that 17 times 23 is 391."}])
+        self.assertEqual(calls, ["solve", "answer"])  # no plan, no subtasks, one cloud call
+        self.assertEqual(result.metrics["cloud_calls"], 1)
+
     async def test_direct_cloud_mode(self):
         calls = []
         class Recorder(SimulatedProvider):
@@ -171,13 +193,13 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((policy.escalation_threshold, policy.local_samples, policy.cloud_mode), (0.4, 1, "direct"))
 
     async def test_fewer_local_attempts_escalate_sooner(self):
-        relay = Relay(SimulatedProvider("repair"), policy=RoutingPolicy(local_worker_attempts=1))
+        relay = Relay(SimulatedProvider("repair"), policy=RoutingPolicy(local_worker_attempts=1, cloud_mode="plan"))
         result = await relay.run("Prioritize", demo_sources())
         workers = [c for c in result.metrics["calls"] if c["operation"] == "work" and c["tier"] == "cloud"]
         self.assertEqual([c["task_id"] for c in workers], ["extract_report_1"])
 
     async def test_escalation_can_be_disabled(self):
-        relay = Relay(SimulatedProvider("escalate"), policy=RoutingPolicy(escalate_failed_local_tasks=False))
+        relay = Relay(SimulatedProvider("escalate"), policy=RoutingPolicy(escalate_failed_local_tasks=False, cloud_mode="plan"))
         with self.assertRaises(ValidationError):
             await relay.run("Prioritize", demo_sources())
 
@@ -190,7 +212,7 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
                     return Reply({}, "fake")
                 return await super().complete(tier, operation, payload)
         with self.assertRaises(ValidationError):
-            await Relay(BadPlanner(), policy=RoutingPolicy(plan_attempts=1)).run("Goal", {"a": "text"})
+            await Relay(BadPlanner(), policy=RoutingPolicy(plan_attempts=1, cloud_mode="plan")).run("Goal", {"a": "text"})
         self.assertEqual(calls, ["solve", "plan"])
 
     def test_invalid_policy(self):
@@ -211,7 +233,8 @@ class RelayApiTests(unittest.IsolatedAsyncioTestCase):
             async def complete(self, tier, operation, payload):
                 seen.append(payload)
                 return await super().complete(tier, operation, payload)
-        await Relay(Recorder()).chat([{"role": "system", "content": "Be terse"}, {"role": "user", "content": "Go"}])
+        await Relay(Recorder(), policy=RoutingPolicy(cloud_mode="plan")).chat(
+            [{"role": "system", "content": "Be terse"}, {"role": "user", "content": "Go"}])
         self.assertEqual(seen[0]["task"], "system: Be terse\n\nuser: Go\n\nRespond to the last user message.")
         plan = next(p for p in seen if "validation_error" in p)
         self.assertEqual(plan["goal"], "Go")

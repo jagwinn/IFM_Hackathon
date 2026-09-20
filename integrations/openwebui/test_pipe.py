@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from horizon_relay import Relay, RelayError, SimulatedProvider
+from horizon_relay import Relay, RelayError, RoutingPolicy, SimulatedProvider
 
 import horizon_relay_pipe as pipe_module
 
@@ -92,7 +92,8 @@ class StreamingProvider(SimulatedProvider):
 class StreamingTests(unittest.IsolatedAsyncioTestCase):
     async def test_live_answer_streams_with_thinking_first(self):
         with patch.dict("os.environ", {"RELAY_PROVIDER": "live"}), \
-                patch.object(pipe_module.Relay, "from_env", return_value=Relay(StreamingProvider())):
+                patch.object(pipe_module.Relay, "from_env",
+                             return_value=Relay(StreamingProvider(), policy=RoutingPolicy(cloud_mode="plan"))):
             stream = await pipe_module.Pipe().pipe(
                 {"model": "horizon_relay.live", "messages": [{"role": "user", "content": "Prioritize the reports"}]})
             chunks = [c async for c in stream]

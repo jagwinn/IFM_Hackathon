@@ -2,20 +2,25 @@ import asyncio
 from dataclasses import replace
 import unittest
 
-from horizon_relay import BudgetError, Limits, RelayEngine, RelayError, Reply, SimulatedProvider, ValidationError
+from horizon_relay import (BudgetError, Limits, RelayEngine, RelayError, Reply, RoutingPolicy, SimulatedProvider,
+                           ValidationError)
 from horizon_relay.plan import Plan
 from horizon_relay.providers.simulated import demo_sources
 
 
+PLANS = RoutingPolicy(cloud_mode="plan")  # these tests exercise planning and delegation
+
+
 class RelayTests(unittest.IsolatedAsyncioTestCase):
-    async def run_demo(self, scenario="standard", limits=None, provider=None):
+    async def run_demo(self, scenario="standard", limits=None, provider=None, policy=None):
         events = []
         async def emit(event):
             events.append(event)
         sources = demo_sources()
         if scenario == "local":
             sources = {"report_1": sources["report_1"]}
-        result = await RelayEngine(provider or SimulatedProvider(scenario), limits).run(
+        result = await RelayEngine(provider or SimulatedProvider(scenario), limits,
+                                   policy or RoutingPolicy(cloud_mode="plan")).run(
             "Extract report verbatim" if scenario == "local" else "Prioritize bug reports",
             sources, local_extract=scenario == "local", emit=emit,
         )
@@ -79,7 +84,7 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
             if event.name == "task_completed" and event.data["task_id"] == "extract_report_2":
                 accepted.set()
         with self.assertRaises(RelayError):
-            await RelayEngine(FailedSibling(), Limits(local_concurrency=2)).run("Goal", demo_sources(), emit=emit)
+            await RelayEngine(FailedSibling(), Limits(local_concurrency=2), PLANS).run("Goal", demo_sources(), emit=emit)
         self.assertIn("extract_report_2", events[-1].data["metrics"]["completed_tasks"])
 
     async def test_only_failed_task_escalates(self):
@@ -185,7 +190,7 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
                 return await super().complete(tier, operation, payload)
         async def emit(event):
             events.append(event)
-        job = asyncio.create_task(RelayEngine(BlockedWorker(), Limits(local_concurrency=2)).run("Goal", demo_sources(), emit=emit))
+        job = asyncio.create_task(RelayEngine(BlockedWorker(), Limits(local_concurrency=2), PLANS).run("Goal", demo_sources(), emit=emit))
         await asyncio.wait_for(worker_started.wait(), 1)
         job.cancel()
         with self.assertRaises(asyncio.CancelledError):
@@ -209,11 +214,11 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         async def broken_emit(event):
             raise RuntimeError("Disconnected")
         with self.assertLogs("horizon_relay.engine", level="WARNING"):
-            result = await RelayEngine(SimulatedProvider()).run("Goal", demo_sources(), emit=broken_emit)
+            result = await RelayEngine(SimulatedProvider(), policy=PLANS).run("Goal", demo_sources(), emit=broken_emit)
         self.assertIn("SIMULATED", result.content)
 
     async def test_runs_have_distinct_ids_and_no_shared_results(self):
-        engine = RelayEngine(SimulatedProvider())
+        engine = RelayEngine(SimulatedProvider(), policy=PLANS)
         a, b = await asyncio.gather(engine.run("A", demo_sources()), engine.run("B", demo_sources()))
         self.assertNotEqual(a.run_id, b.run_id)
         a.results.clear()
@@ -226,7 +231,7 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
             snapshot = list(saved)
             await asyncio.sleep(0.001)
             saved = snapshot + [event.seq]
-        await RelayEngine(SimulatedProvider("escalate"), Limits(local_concurrency=2)).run(
+        await RelayEngine(SimulatedProvider("escalate"), Limits(local_concurrency=2), PLANS).run(
             "Goal", demo_sources(), emit=read_append_write,
         )
         self.assertGreater(len(saved), 18)

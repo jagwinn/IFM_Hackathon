@@ -28,6 +28,7 @@ Limits bound every run: tasks, cloud calls (one is always kept for the final ans
 | Kinds of subtask results and how they are checked | [`results.py`](src/horizon_relay/results.py) (`RESULT_TYPES`) |
 | Call, task and time limits | [`settings.py`](src/horizon_relay/settings.py) (`Limits`) |
 | Endpoints, models, keys (environment variables) | [`settings.py`](src/horizon_relay/settings.py) (`RelaySettings.from_env`) |
+| When the cloud splits work up instead of answering | [`policy.py`](src/horizon_relay/policy.py) (`plans`, `plan_min_parts`, `plan_min_chars`) |
 | The decision graph (data / drawing) | [`graph.py`](src/horizon_relay/graph.py) / [`ui/graph.html`](src/horizon_relay/ui/graph.html) |
 | How a chat conversation becomes a request (`/local-extract`) | [`conversation.py`](src/horizon_relay/conversation.py) |
 | Talking to a different model API | [`providers/`](src/horizon_relay/providers/) |
@@ -92,6 +93,8 @@ All decisions live in [`policy.py`](src/horizon_relay/policy.py). For each local
 | `task_complexity` | how hard the request looks | keyword/length heuristic |
 | `explicit_escalation` | whether it asked for help | 1 if it set `needs_escalation` |
 
+Past the largest local model the cloud takes over. It splits the request into subtasks and delegates them back to the local models only when that pays off: the request must ask for at least `plan_min_parts` separable things (compare…, suggest…, identify…) and be at least `plan_min_chars` long. A single question or one chain of reasoning it answers itself, in one call. `cloud_mode="plan"` or `"direct"` forces either behaviour.
+
 **Rules** run first and can force escalation: the model asked for help or gave no answer; the critic rejected the answer with severity ≥ 0.5; the 0.9B's token uncertainty ≥ 0.12. Otherwise the **score** (weighted mean of the available signals) is compared with the model's **threshold**: 0.50 for the 0.9B, 0.25 for the 4B.
 
 ```python
@@ -104,7 +107,8 @@ policy = RoutingPolicy(
              "critic_risk": 0.25, "task_complexity": 0.10, "explicit_escalation": 0.10},
     rules=(escalate_when_requested, critic_fails(0.5), token_uncertainty_at_least(0.12)),
     skip_small_above=None,   # e.g. 0.3: send requests that look hard straight past the 0.9B
-    cloud_mode="plan",       # or "direct"
+    cloud_mode="auto",       # or "plan" / "direct"; auto splits work up only when it pays off
+    plan_min_parts=2, plan_min_chars=120,
 )
 relay = Relay.from_env(policy=policy)
 ```

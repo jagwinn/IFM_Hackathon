@@ -19,8 +19,10 @@ wrong answers before tuning. Re-tune when models change.
 
 `rules` run first and may force a decision; otherwise a score at or above the tier's threshold
 escalates to the next model up. Requests whose task_complexity reaches `skip_small_above` skip the
-smallest model entirely. Past the largest local model the cloud takes over: it plans and
-delegates subtasks (cloud_mode="plan") or answers directly ("direct").
+smallest model entirely. Past the largest local model the cloud takes over. With cloud_mode="auto" it plans and delegates
+subtasks back to the local models only when the request has several separable parts and is long enough
+for that to pay off; a single question or one chain of reasoning it simply answers. "plan" and "direct"
+force either behaviour.
 
 Tune by passing a RoutingPolicy to Relay, or with environment variables (see from_env).
 """
@@ -146,6 +148,11 @@ HARD_MARKERS = ("prove", "derive", "counterexample", "debug", "race condition", 
 MEDIUM_MARKERS = ("compare", "explain why", "analyze", "reason", "tradeoff", "plan", "design", "evaluate",
                   "infer", "calculate")
 
+# Things a request can ask for. Several of them means the work can be split up and handed out.
+DELIVERABLES = ("compare", "list", "summar", "extract", "suggest", "recommend", "identif", "outline", "draft",
+                "plan", "write", "propose", "describe", "explain", "evaluate", "analy", "estimate", "calculate",
+                "determine", "derive", "prove", "design", "classif", "rewrite", "translate", "review")
+
 
 def task_complexity(text: str) -> float:
     """Small deterministic signal; intentionally simple and easy to explain."""
@@ -153,6 +160,12 @@ def task_complexity(text: str) -> float:
     score = 0.05 + 0.07 * sum(m in p for m in MEDIUM_MARKERS) + 0.12 * sum(m in p for m in HARD_MARKERS)
     score += 0.10 * (len(text) > 500) + 0.10 * (len(text) > 1200) + 0.08 * (text.count("?") > 2)
     return _clamp(score)
+
+
+def request_parts(text: str) -> int:
+    """Roughly how many separable things the request asks for, for deciding whether splitting it pays off."""
+    lowered = text.lower()
+    return max(1, sum(marker in lowered for marker in DELIVERABLES) + max(0, lowered.count("?") - 1))
 
 
 def similarity(a: str, b: str) -> float:
@@ -231,7 +244,9 @@ class RoutingPolicy:
                                token_uncertainty_at_least(0.12, tiers=("local",)))
     cross_critic: bool = True  # the next larger local model critiques; the largest critiques itself
     skip_small_above: float | None = None  # task_complexity at which the smallest model is skipped
-    cloud_mode: str = "plan"  # "plan": plan and delegate subtasks back to local models; "direct": cloud answers
+    cloud_mode: str = "auto"  # "auto": plan only when it pays off (see plans); "plan"/"direct" force one way
+    plan_min_parts: int = 2  # separable things the request must ask for before the cloud splits it up
+    plan_min_chars: int = 120  # and how long it must be: splitting a one-liner costs more than it saves
     # Plan mode only:
     local_worker_attempts: int = 2  # tries on the assigned local model before a subtask fails or escalates
     escalate_failed_local_tasks: bool = True  # then one try on each larger tier, for that subtask only
@@ -243,8 +258,8 @@ class RoutingPolicy:
         for name in ("local_samples", "local_worker_attempts", "plan_attempts"):
             if type(getattr(self, name)) is not int or getattr(self, name) < 1:
                 raise ValueError(f"{name} must be at least 1")
-        if self.cloud_mode not in ("plan", "direct"):
-            raise ValueError("cloud_mode must be 'plan' or 'direct'")
+        if self.cloud_mode not in ("auto", "plan", "direct"):
+            raise ValueError("cloud_mode must be 'auto', 'plan' or 'direct'")
         if set(self.weights) != set(WEIGHTS):
             raise ValueError(f"weights must cover exactly {sorted(WEIGHTS)}")
 
@@ -294,6 +309,12 @@ class RoutingPolicy:
         available = {k: v for k, v in values.items() if v is not None and k in self.weights}
         total = sum(self.weights[k] for k in available)
         return _clamp(sum(self.weights[k] * v for k, v in available.items()) / total) if total else 0.0
+
+    def plans(self, text: str) -> bool:
+        """Whether the cloud should split this request into subtasks instead of answering it itself."""
+        if self.cloud_mode != "auto":
+            return self.cloud_mode == "plan"
+        return request_parts(text) >= self.plan_min_parts and len(text) >= self.plan_min_chars
 
     def threshold(self, tier: str) -> float:
         return self.tier_thresholds.get(tier, self.escalation_threshold)
