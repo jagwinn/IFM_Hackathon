@@ -113,6 +113,8 @@ async def tune(args):
                "token_min_length": rule_limit("escalate_when_tokens_are_uncertain", "min_tokens") or 1}
     ranked = search(profiles)
     best_params, best = ranked[0]
+    print(f"current: {evaluate(current, profiles)}", file=sys.stderr)
+    print(f"best:    {best}", file=sys.stderr)
     report = {"current": {"params": current, "result": evaluate(current, profiles)},
               "best": {"params": best_params, "result": best},
               "runners_up": [{"params": p, "result": {k: v for k, v in r.items() if k != "routes"}} for p, r in ranked[1:6]],

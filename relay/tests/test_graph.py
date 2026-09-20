@@ -52,7 +52,7 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(set(judge["signals"]), {"self_uncertainty", "token_uncertainty", "inconsistency", "critic_risk",
                                                      "task_complexity", "explicit_escalation", "combined_score"})
             self.assertEqual(judge["weights"]["critic_risk"], 0.25)
-            self.assertEqual(judge["threshold"], {"local": 0.5, "mid": 0.25}[tier])
+            self.assertEqual(judge["threshold"], {"local": 0.3, "mid": 0.25}[tier])
         # The planner delegated down with reasons.
         self.assertEqual(nodes["extract"]["lane"], "local")
         self.assertEqual(nodes["extract"]["why"], "Literal copying")

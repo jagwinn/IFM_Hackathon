@@ -37,8 +37,9 @@ class OpenAICompatibleProvider:
     simulated = False
     streams = True  # complete() accepts on_delta and reports text as the model writes it
 
-    def __init__(self, local: Endpoint, cloud: Endpoint, *, mid: Endpoint | None = None, transport=None):
-        self.local, self.cloud, self.mid, self.transport = local, cloud, mid, transport
+    def __init__(self, local: Endpoint, cloud: Endpoint, *, mid: Endpoint | None = None, transport=None,
+                 timeout: float = 180):
+        self.local, self.cloud, self.mid, self.transport, self.timeout = local, cloud, mid, transport, timeout
         self.endpoints = {"local": local, **({"mid": mid} if mid else {}), "cloud": cloud}
         self.models = {tier: e.model for tier, e in self.endpoints.items()}
 
@@ -94,7 +95,7 @@ class OpenAICompatibleProvider:
             headers["Authorization"] = "Bearer " + endpoint.key
         url = endpoint.url.rstrip("/") + "/chat/completions"
         try:
-            async with httpx.AsyncClient(timeout=120, transport=self.transport, follow_redirects=False) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport, follow_redirects=False) as client:
                 if on_delta:
                     content, reasoning, logprobs, finish, usage = await _read_stream(client, url, request, headers, tier, on_delta)
                 else:

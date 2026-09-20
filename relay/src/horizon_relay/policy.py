@@ -5,8 +5,8 @@ Each local model, smallest first, answers the request itself and judges its own 
 (`cross_critic`), since a model rarely catches its own mistakes. Six signals are combined into a score:
 
     self_uncertainty     1 - the model's average self-reported confidence
-    token_uncertainty    1 - the geometric-mean probability of the answer's own tokens (logprobs), when available
-    inconsistency        how much its samples disagree
+    token_uncertainty    how much of the answer the model was torn about, from its token log-probabilities
+    inconsistency        how much its samples disagree about substance (content words and numbers, not wording)
     critic_risk          how serious a flaw the critic found (0-1)
     task_complexity      a small keyword/length heuristic over the request
     explicit_escalation  1 if the model said it needs a larger model
@@ -14,8 +14,8 @@ Each local model, smallest first, answers the request itself and judges its own 
 The score is the weighted mean of the signals that are available (weights are relative).
 
 Defaults were tuned with `horizon-relay tune` on the built-in routing tests (K2-Horizon 0.9B and 4B on an
-RTX 3070): 20 of 22 tests routed as labeled and one wrong local answer returned, against 12 of 22 and six
-wrong answers before tuning. Re-tune when models change.
+RTX 3070): 23 of 24 routed as labeled, two wrong local answers returned, and one case where the cloud was
+paid for work a local model had already got right. Re-tune when models change.
 
 `rules` run first and may force a decision; otherwise a score at or above the tier's threshold
 escalates to the next model up. Requests whose task_complexity reaches `skip_small_above` skip the
@@ -135,7 +135,7 @@ def critic_fails(min_severity: float = 0.5) -> Rule:
 
 WEIGHTS = {
     "self_uncertainty": 0.25,
-    "token_uncertainty": 0.15,
+    "token_uncertainty": 0.30,
     "inconsistency": 0.25,
     "critic_risk": 0.25,
     "task_complexity": 0.10,
@@ -169,8 +169,35 @@ def request_parts(text: str) -> int:
     return max(1, sum(marker in lowered for marker in DELIVERABLES) + max(0, lowered.count("?") - 1))
 
 
-def similarity(a: str, b: str) -> float:
-    return SequenceMatcher(None, " ".join(a.lower().split()), " ".join(b.lower().split())).ratio()
+STOPWORDS = frozenset("this that these those with from have been will would could should about into than then "
+                      "them they their there here which where when what does done doing because while also very "
+                      "such each other more most some only just like over under both same".split())
+
+
+def content_words(text: str) -> set[str]:
+    """The words that carry the answer's substance, ignoring wording and filler."""
+    return {w for w in re.findall(r"[a-z][a-z0-9_]{3,}", text.lower()) if w not in STOPWORDS}
+
+
+def numbers_in(text: str) -> set[str]:
+    return {n.rstrip(".").replace(",", "") for n in re.findall(r"-?\d+(?:[.,]\d+)*", text)}
+
+
+def agreement(a: str, b: str) -> float:
+    """How much two answers say the same thing. Long free text can be worded very differently and still
+    agree, so shared substance counts as much as matching text, and one answer containing the other's
+    content counts as agreement. Numbers are the exception: answers that state different numbers disagree
+    however similar their prose is."""
+    surface = SequenceMatcher(None, " ".join(a.lower().split()), " ".join(b.lower().split())).ratio()
+    first, second = content_words(a), content_words(b)
+    substance = len(first & second) / min(len(first), len(second)) if first and second else surface
+    left, right = numbers_in(a), numbers_in(b)
+    if left and right:
+        shared_numbers = len(left & right) / len(left | right)
+        if not shared_numbers:
+            return min(surface, 0.3)
+        return max(surface, substance, shared_numbers)
+    return max(surface, substance)
 
 
 def _salvage(text: str) -> dict | None:
@@ -236,10 +263,12 @@ def answer_exact_extraction(goal: str, sources: dict[str, str], candidate: Any) 
 
 @dataclass(frozen=True)
 class RoutingPolicy:
-    escalation_threshold: float = 0.50
+    escalation_threshold: float = 0.30
     tier_thresholds: dict = field(default_factory=lambda: {"mid": 0.25})  # per-tier override of the threshold
     local_samples: int = 2  # answers per local model; their disagreement is the inconsistency signal
     use_critic: bool = True
+    token_signal: str = "mean"  # "mean": 1 - average token probability; "hesitation": share of tokens it was torn about
+    escalate_big_goals: bool = True  # a goal with bulk_parts separable parts is worth planning and handing out
     weights: dict = field(default_factory=lambda: dict(WEIGHTS))
     rules: tuple[Rule, ...] = (escalate_when_requested, reject_empty_answers, critic_fails(0.5),
                                token_uncertainty_at_least(0.12, tiers=("local",)))
@@ -297,15 +326,23 @@ class RoutingPolicy:
     def signals(self, text: str, samples: list[Assessment], critique: Critique) -> Signals:
         uncertainty = 1.0 - mean(s.confidence for s in samples)
         pairs = [(a, b) for i, a in enumerate(samples) for b in samples[i + 1:]]
-        inconsistency = 1.0 - mean(similarity(a.answer, b.answer) for a, b in pairs) if pairs else 0.0
-        token_probs = [s.token_prob for s in samples if s.token_prob is not None]
+        inconsistency = 1.0 - mean(agreement(a.answer, b.answer) for a, b in pairs) if pairs else 0.0
         values = {"self_uncertainty": uncertainty,
-                  "token_uncertainty": 1.0 - mean(token_probs) if token_probs else None,
+                  "token_uncertainty": self.token_uncertainty(samples),
                   "inconsistency": inconsistency, "critic_risk": critique.severity,
                   "task_complexity": task_complexity(text),
                   "explicit_escalation": 1.0 if any(s.needs_escalation for s in samples) else 0.0}
         return Signals(**{k: None if v is None else round(v, 4) for k, v in values.items()},
                        combined_score=round(self.combine(values), 4))
+
+    def token_uncertainty(self, samples: list[Assessment]) -> float | None:
+        """How unsure the model was of its own words, or None when it returned no log-probabilities."""
+        stats = [s.token_stats for s in samples if s.token_stats]
+        if not stats:
+            return None
+        if self.token_signal == "hesitation":
+            return _clamp(mean(s.get("hesitation", 0.0) for s in stats))
+        return _clamp(1.0 - mean(s.get("prob", 1.0) for s in stats))
 
     def combine(self, values: dict) -> float:
         """Weighted mean of the available signals (a signal of None is left out)."""
@@ -339,6 +376,10 @@ class RoutingPolicy:
         signals = self.signals(text, samples, critique)
         threshold = self.threshold(tier)
         base = Verdict(tier, tuple(samples), critique, signals, threshold, False, "")
+        parts = request_parts(text)
+        if self.escalate_big_goals and parts >= self.bulk_parts:
+            return Verdict(**{**base.__dict__, "escalate": True,
+                              "reason": f"A goal asking for {parts} things is worth planning and handing out"})
         for rule in self.rules:
             forced = rule(base)
             if forced is not None:

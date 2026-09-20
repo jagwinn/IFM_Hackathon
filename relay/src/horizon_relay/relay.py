@@ -30,7 +30,8 @@ class Relay:
             from .providers.openai_compatible import OpenAICompatibleProvider
         except ModuleNotFoundError as exc:
             raise RelayError("Real models need httpx: pip install 'horizon-relay[live]'") from exc
-        provider = OpenAICompatibleProvider(settings.local, settings.cloud, mid=settings.mid, transport=transport)
+        provider = OpenAICompatibleProvider(settings.local, settings.cloud, mid=settings.mid, transport=transport,
+                                            timeout=settings.limits.call_timeout)
         return cls(provider, limits=settings.limits, policy=policy)
 
     @classmethod

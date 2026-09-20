@@ -6,6 +6,7 @@ answer_token_stats() finds the tokens of one JSON field's value (by default "ans
 
 import math
 import re
+from statistics import median
 
 MAX_TOKENS_SHOWN = 120
 
@@ -46,12 +47,17 @@ def answer_token_stats(tokens: list[dict] | None, field: str = "answer") -> dict
         return None
     logprobs = [t["lp"] for t in chosen]
     mean_lp = sum(logprobs) / len(logprobs)
+    probs = [math.exp(lp) for lp in logprobs]
     weakest = min(chosen, key=lambda t: t["lp"])
     return {
         "span": field if span else "output",
         "count": len(chosen),
         "mean_logprob": round(mean_lp, 4),
         "prob": round(math.exp(mean_lp), 4),  # geometric-mean probability per token
+        # In a long answer most tokens are wording choices, which drags the mean down without the model
+        # being unsure of anything. The share of genuinely torn tokens does not grow with length.
+        "hesitation": round(sum(p < 0.5 for p in probs) / len(probs), 4),
+        "median_prob": round(median(probs), 4),
         "min_prob": round(math.exp(weakest["lp"]), 4),
         "min_token": weakest["t"],
         "tokens": [{"t": t["t"], "p": round(math.exp(t["lp"]), 4),

@@ -7,7 +7,7 @@ if importlib.util.find_spec("httpx"):
     import httpx
     from horizon_relay.providers.openai_compatible import OpenAICompatibleProvider
 
-from horizon_relay import Endpoint, RelayEngine, RelayError
+from horizon_relay import Endpoint, Relay, RelayEngine, RelayError
 
 
 @unittest.skipUnless(importlib.util.find_spec("httpx"), "Install the live extra to test HTTP adapters")
@@ -32,6 +32,12 @@ class LiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("test-secret", repr(provider.cloud))
         self.assertEqual(local.value, {"needs_plan": True})
         self.assertEqual(local.prompt_tokens, 12)
+
+    async def test_http_timeout_follows_the_call_limit(self):
+        from horizon_relay import Limits, RelaySettings
+        relay = Relay.from_settings(RelaySettings(Endpoint("http://local/v1", "small"), Endpoint("https://c/v1", "large", "k"),
+                                                  Limits(call_timeout=42)), transport=httpx.MockTransport(lambda r: httpx.Response(200, json={})))
+        self.assertEqual(relay.provider.timeout, 42)
 
     async def test_errors_do_not_echo_credentials_or_response_body(self):
         provider = self.provider(lambda r: httpx.Response(401, text="test-secret request was invalid"))

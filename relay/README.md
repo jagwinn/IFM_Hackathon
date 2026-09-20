@@ -87,23 +87,23 @@ All decisions live in [`policy.py`](src/horizon_relay/policy.py). For each local
 | Signal | Captures | Measured as |
 | --- | --- | --- |
 | `self_uncertainty` | what the model says about itself | 1 − average self-reported confidence |
-| `token_uncertainty` | how sure it was of the words it wrote | 1 − geometric-mean probability of the answer's tokens (logprobs); left out when unavailable |
-| `inconsistency` | whether it answers the same twice | 1 − similarity of its two answers |
+| `token_uncertainty` | how sure it was of the words it wrote | 1 − geometric-mean probability of the answer's tokens (logprobs); left out when unavailable. `token_signal="hesitation"` counts only the tokens under 50% instead |
+| `inconsistency` | whether it answers the same twice | 1 − agreement of its two answers: shared content words, one answer containing the other's substance counts as agreement, and different numbers count as disagreement however alike the wording |
 | `critic_risk` | what a second look found | severity from the critic (the next larger local model) |
 | `task_complexity` | how hard the request looks | keyword/length heuristic |
 | `explicit_escalation` | whether it asked for help | 1 if it set `needs_escalation` |
 
 Past the largest local model the cloud takes over. It splits the request into subtasks and delegates them back to the local models only when that pays off: the request must ask for at least `plan_min_parts` separable things (compare…, suggest…, identify…) and be at least `plan_min_chars` long. A single question or one chain of reasoning it answers itself, in one call. `cloud_mode="plan"` or `"direct"` forces either behaviour.
 
-**Rules** run first and can force escalation: the model asked for help or gave no answer; the critic rejected the answer with severity ≥ 0.5; the 0.9B's token uncertainty ≥ 0.12. Otherwise the **score** (weighted mean of the available signals) is compared with the model's **threshold**: 0.50 for the 0.9B, 0.25 for the 4B.
+**Rules** run first and can force escalation: the goal asks for `bulk_parts` separable things (worth planning and handing out rather than answering alone); the model asked for help or gave no answer; the critic rejected the answer with severity ≥ 0.5; the 0.9B's token uncertainty ≥ 0.12 on an answer of at least three tokens. Otherwise the **score** (weighted mean of the available signals) is compared with the model's **threshold**: 0.30 for the 0.9B, 0.25 for the 4B.
 
 ```python
 from horizon_relay import Relay, RoutingPolicy
 from horizon_relay.policy import critic_fails, escalate_when_requested, token_uncertainty_at_least
 
 policy = RoutingPolicy(
-    escalation_threshold=0.5, tier_thresholds={"mid": 0.25},
-    weights={"self_uncertainty": 0.25, "token_uncertainty": 0.15, "inconsistency": 0.25,
+    escalation_threshold=0.3, tier_thresholds={"mid": 0.25},
+    weights={"self_uncertainty": 0.25, "token_uncertainty": 0.30, "inconsistency": 0.25,
              "critic_risk": 0.25, "task_complexity": 0.10, "explicit_escalation": 0.10},
     rules=(escalate_when_requested, critic_fails(0.5), token_uncertainty_at_least(0.12)),
     skip_small_above=None,   # e.g. 0.3: send requests that look hard straight past the 0.9B
@@ -137,7 +137,7 @@ thinking to show), or per model with `LOCAL_REASONING_EFFORT`, `MID_REASONING_EF
 - `horizon-relay eval [selection]` runs them and reports route and answer accuracy (`--graph-dir` saves each graph). In Open WebUI the **Horizon Relay Tests** model does the same with `/run` and saves one chat per test in the **Tests** folder.
 - `horizon-relay tune` has both local models answer every test with escalation forced and the cloud off (no cloud calls), saves those profiles, and searches weights, thresholds and rules against the labels, penalizing any setting that would return a wrong local answer. `--reuse` re-searches saved profiles offline in seconds.
 
-The current defaults came from that search: 20 of 22 tests routed as labeled, up from 12, and one wrong local answer returned instead of six. The token-uncertainty rule does most of that work, catching answers the local critic waved through; it ignores answers shorter than three tokens, where one hesitant token ("positive" against "Positive") would otherwise look like doubt. Twenty-odd tests guide the settings; they do not validate them. Re-tune after changing models or prompts.
+The current defaults came from that search: 23 of 24 tests routed as labeled, two wrong local answers returned, and one case where the cloud was paid for work a local model had already got right. The search charges for that last one: escalating to the cloud over a correct local answer is the waste the relay exists to avoid, while climbing from the 0.9B to the 4B over one costs only local time. The token-uncertainty rule does most of that work, catching answers the local critic waved through; it ignores answers shorter than three tokens, where one hesitant token ("positive" against "Positive") would otherwise look like doubt. Twenty-odd tests guide the settings; they do not validate them. Re-tune after changing models or prompts.
 
 ## Command line
 

@@ -64,7 +64,7 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
     async def test_tier_thresholds(self):
         relay = Relay(SmallUnsureMidSure(), policy=RoutingPolicy(rules=(), tier_thresholds={"mid": 0.0}))
         result = await relay.chat([{"role": "user", "content": "Capital of France?"}])
-        self.assertEqual([v["threshold"] for v in result.metrics["verdicts"]], [0.5, 0.0])
+        self.assertEqual([v["threshold"] for v in result.metrics["verdicts"]], [0.3, 0.0])
         self.assertEqual(result.metrics["route"], "cloud")
 
     async def test_custom_rule_can_keep_work_local(self):
@@ -181,6 +181,17 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         delegated = [c["tier"] for c in result.metrics["calls"] if c["operation"] == "work"]
         self.assertEqual(sorted(delegated), ["cloud", "local", "local", "mid"])
 
+    async def test_a_goal_with_many_parts_is_worth_handing_out(self):
+        policy = RoutingPolicy()
+        big = ("Design the data model, implement add_book and checkout, list the error cases and explain how the "
+               "pieces fit together for a library catalogue module.")
+        verdict = policy.decide("local", big, [Assessment("done", 0.99, "t", "low", False, "")], Critique(True, 0.0, ""))
+        self.assertTrue(verdict.escalate)  # even a confident, critic-approved answer
+        self.assertIn("worth planning and handing out", verdict.reason)
+        small = policy.decide("local", "What is 17 times 23?", [Assessment("391", 0.99, "t", "low", False, "")],
+                              Critique(True, 0.0, ""))
+        self.assertFalse(small.escalate)
+
     async def test_direct_cloud_mode(self):
         calls = []
         class Recorder(SimulatedProvider):
@@ -202,8 +213,11 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         expected = (w["self_uncertainty"] * 0.2 + w["critic_risk"] * 0.2 + w["task_complexity"] * signals.task_complexity) \
             / (sum(w.values()) - w["token_uncertainty"])
         self.assertAlmostEqual(signals.combined_score, expected, places=3)
-        with_tokens = [Assessment("391", 0.9, "t", "low", False, "", token_prob=0.5)] * 2
-        self.assertAlmostEqual(policy.signals("x", with_tokens, Critique(True, 0.0, "")).token_uncertainty, 0.5)
+        torn = [Assessment("391", 0.9, "t", "low", False, "", token_prob=0.5,
+                           token_stats={"prob": 0.5, "hesitation": 0.25, "count": 4})] * 2
+        self.assertAlmostEqual(policy.signals("x", torn, Critique(True, 0.0, "")).token_uncertainty, 0.5)
+        by_hesitation = RoutingPolicy(token_signal="hesitation")
+        self.assertAlmostEqual(by_hesitation.signals("x", torn, Critique(True, 0.0, "")).token_uncertainty, 0.25)
 
     def test_unstructured_outputs_count_against_the_answer(self):
         self.assertTrue(read_assessment("free text").needs_escalation)
@@ -217,6 +231,16 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((sample.answer, sample.confidence, sample.needs_escalation), ("Detroit", 0.95, False))
         self.assertTrue(sample.repaired and sample.structured)
         self.assertIn("Clear city name", sample.reason)
+
+    def test_agreement_looks_at_substance_not_wording(self):
+        from horizon_relay.policy import agreement
+        one = "The expected number of flips is 6, derived with a Markov chain over the two states."
+        two = ("Using states for 'no head yet' and 'one head', solving the recursion gives an expected "
+               "waiting time of 6 flips.")
+        self.assertGreater(agreement(one, two), 0.8)  # same answer and substance, different words
+        self.assertLess(agreement(one, "The expected number of flips is 4."), 0.4)  # different number: disagreement
+        wordy = "Positive sentiment, clearly, because the reviewer says they absolutely loved the movie."
+        self.assertGreater(agreement("positive", wordy), 0.6)  # one answer contains the other's substance
 
     def test_complexity_heuristic(self):
         self.assertLess(task_complexity("Extract the city"), task_complexity("Derive the probability and prove it"))
