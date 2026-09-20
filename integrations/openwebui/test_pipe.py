@@ -29,8 +29,13 @@ class PipeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Engineering plan", result)
         statuses = [e for e in events if e["type"] == "status"]
         embeds = [e for e in events if e["type"] == "embeds"]
-        self.assertEqual([s["data"]["done"] for s in statuses], [False, True])
-        self.assertTrue(statuses[0]["data"]["description"].startswith("[SIMULATED] "))
+        descriptions = [s["data"]["description"] for s in statuses]
+        self.assertEqual(descriptions[0], "[SIMULATED] Starting")
+        self.assertEqual([s["data"]["done"] for s in statuses], [False] * (len(statuses) - 1) + [True])
+        self.assertTrue(all(d.startswith("[SIMULATED] ") for d in descriptions))
+        self.assertTrue(any("Planned 3 subtasks" in d for d in descriptions))
+        self.assertTrue(any("working on: Extract the report verbatim" in d for d in descriptions))
+        self.assertTrue(any("escalating" in d for d in descriptions))
         self.assertGreater(len(embeds), 3)
         self.assertTrue(all(e["data"]["replace"] and len(e["data"]["embeds"]) == 1 for e in embeds))
         final = embeds[-1]["data"]["embeds"][0]

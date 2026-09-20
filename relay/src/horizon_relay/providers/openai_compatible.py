@@ -126,10 +126,11 @@ class OpenAICompatibleProvider:
 
 
 def _max_tokens(tier: str, operation: str) -> int:
-    """Output budget per call. The cloud model reasons before answering, so it needs far more room."""
+    """Output budget per call. Models that reason before answering need room for the reasoning too:
+    the 4B regularly ran past 2048 tokens on harder requests, and the cloud model needs far more."""
     if tier == "cloud":
         return 8192 if operation == "work" else 16384
-    return 2048
+    return 4096 if tier == "mid" else 2048
 
 
 def _token_logprobs(choice) -> list | None:

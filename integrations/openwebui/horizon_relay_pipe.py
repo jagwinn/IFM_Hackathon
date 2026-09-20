@@ -38,19 +38,39 @@ def graph_embed(graph: RunGraph) -> dict:
     return {"type": "embeds", "data": {"embeds": [render_html(graph.to_dict())], "replace": True}}
 
 
+def status_line(event: RelayEvent, graph: RunGraph) -> str | None:
+    """What to show on the message's status line as the run happens, or None to leave it unchanged."""
+    data, name = event.data, event.name
+    model = lambda tier: next((l["model"].split("/")[-1] for l in graph.lanes if l["id"] == tier), tier)
+    if name == "run_started":
+        return "Starting"
+    if name == "local_verdict":
+        verdict = data["verdict"]
+        outcome = "escalating" if verdict["escalate"] else "answer trusted"
+        return f'{model(data["tier"])}: {verdict["reason"]} — {outcome}'
+    if name == "plan_created":
+        tasks = ", ".join(f'{t["instruction"][:60]} → {model(t["preferred_tier"])}' for t in data.get("tasks", []))
+        return f'Planned {len(data.get("tasks", []))} subtasks: {tasks}'
+    if name == "task_started":
+        return f'{model(data["tier"])} working on: {(graph.nodes.get(data["task_id"]) or {}).get("instruction", data["task_id"])[:90]}'
+    if name in ("local_solve", "local_sample", "local_critique", "local_skipped", "escalated", "answering",
+                "task_escalated", "task_invalid", "task_completed", "synthesizing", "plan_invalid") or event.done:
+        return event.message
+    return None
+
+
 def graph_emitter(event_emitter, statuses=True):
-    """Relay event callback that keeps a live decision graph in the message and one short status line."""
+    """Relay event callback that keeps a live decision graph and a live status line in the message."""
     graph = RunGraph()
 
     async def emit(event: RelayEvent):
         graph.add(event)
         prefix = "[SIMULATED] " if event.simulated else ""
-        if statuses and event.name == "run_started":
-            await event_emitter(status(prefix + "Relay running", False))
         if event.name in GRAPH_UPDATES or event.done:
             await event_emitter(graph_embed(graph))
-        if statuses and event.done:
-            await event_emitter(status(prefix + event.message, True))
+        line = status_line(event, graph) if statuses else None
+        if line:
+            await event_emitter(status(prefix + line, event.done))
     return emit
 
 
