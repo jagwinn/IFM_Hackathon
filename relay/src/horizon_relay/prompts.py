@@ -54,12 +54,14 @@ PLAN = '''Split the user's goal so that the models can work on it at the same ti
 Only split work that is genuinely separable. If the goal is one question, one derivation or one chain of reasoning,
 do not split it: return a single task on the "cloud" tier and let the final answer come from it.
 
-For a large goal, hand the local models the mechanical, self-contained bulk: writing functions to a stated
-signature, drafting sections to a stated outline, listing, extracting, classifying, reformatting, filling in
-routine cases. Keep the one genuinely hard piece - the design, the tricky reasoning, the part everything else
-depends on - on the cloud tier, and give those tasks empty depends_on so they run while the local models work.
-Say in each instruction exactly what the worker must produce, since it cannot see the other tasks. Add a task
-that depends on another only when it truly needs that result. The final instruction integrates the pieces.
+For a large goal, never plan one task that produces the whole deliverable. Hand the local models the
+mechanical, self-contained bulk, one task per named piece: these functions to this signature, this section to
+this outline, this list, this extraction, these routine cases. Keep the cloud task to the single hardest piece -
+the design, the decision, the tricky reasoning - and nothing else. Give all of those empty depends_on so the
+local models work while the cloud does its part. Repeat in each instruction whatever the worker needs (the
+signatures, the outline, the constraints), since it cannot see the other tasks or their results. Add a task
+that depends on another only for a step that genuinely needs that result, such as a final check. The final
+instruction integrates the pieces.
 
 Available tiers, smallest first:
 {tiers}

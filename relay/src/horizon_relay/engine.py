@@ -212,6 +212,9 @@ class _Run:
                                                     "attempt": attempt})
             try:
                 plan = Plan.parse(raw, sources, self.limits.max_tasks, self.tiers)
+                wasteful = self.policy.check_plan(plan, _task_text(goal, sources))
+                if wasteful:
+                    raise ValidationError(wasteful)
             except ValidationError as exc:
                 error = str(exc)
                 await self.event("plan_invalid", "Planner returned an invalid graph", attempt=attempt, error=error)

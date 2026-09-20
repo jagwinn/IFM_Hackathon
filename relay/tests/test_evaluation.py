@@ -48,7 +48,7 @@ class EvaluationTests(unittest.IsolatedAsyncioTestCase):
             {"operation": "plan", "tier": "cloud", "task_id": None, "started_ms": 0, "elapsed_ms": 90}]}
         local, cloud, parallel = delegation(metrics)
         self.assertEqual((local, cloud), (2, 1))
-        self.assertEqual(parallel, 350 + 470)  # both local subtasks ran while the cloud worked
+        self.assertEqual(parallel, 500)  # 120ms to 620ms had two or more subtasks in flight
         case = TestCase("t", "delegation", "hard", ("cloud",), "p",
                         expects={"local_subtasks_at_least": 2, "cloud_subtasks_at_most": 1, "parallel_work": True})
         result = CaseResult(case, "cloud", True, 1.0, local_subtasks=local, cloud_subtasks=cloud, parallel_ms=parallel)

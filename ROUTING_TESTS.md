@@ -45,7 +45,7 @@ Run them from Open WebUI with the **Horizon Relay Tests** model: send `/run all`
 
 ## Delegation: big goals the cloud should split up and hand out
 
-These check the behaviour rather than the answer: the cloud should keep the one hard piece, give the mechanical bulk to the local models, run them at the same time, and integrate the results. The runner records how many subtasks went to local models and how long local and cloud work overlapped, and marks the test ✗ if the work was never handed out.
+These check the behaviour rather than the answer: the cloud should keep the one hard piece, give the mechanical bulk to the local models, run those at the same time, and integrate the results. The runner records how many subtasks went to local models and how long two or more subtasks ran at once, and marks the test ✗ if the work was never handed out. A plan that keeps everything in one task is rejected and the planner is asked again.
 
 | # | Question | Expected model | Correct answer | Auto-checked |
 |---|---|---|---|---|

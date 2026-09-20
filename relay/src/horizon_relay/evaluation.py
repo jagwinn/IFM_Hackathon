@@ -126,16 +126,19 @@ async def run_case(relay, case: TestCase, emit=None) -> CaseResult:
 
 
 def delegation(metrics: dict) -> tuple[int, int, int]:
-    """(local subtasks, cloud subtasks, milliseconds where local and cloud subtasks overlapped)."""
+    """(local subtasks, cloud subtasks, milliseconds where two or more subtasks ran at the same time)."""
     work = [c for c in metrics.get("calls", []) if c["operation"] == "work" and c.get("started_ms") is not None]
-    spans = {"local": [], "cloud": []}
-    for call in work:
-        start = call["started_ms"]
-        spans["cloud" if call["tier"] == "cloud" else "local"].append((start, start + (call["elapsed_ms"] or 0)))
-    overlap = sum(max(0, min(a[1], b[1]) - max(a[0], b[0])) for a in spans["local"] for b in spans["cloud"])
+    edges = sorted([(c["started_ms"], 1) for c in work] + [(c["started_ms"] + (c["elapsed_ms"] or 0), -1) for c in work])
+    running = concurrent = 0
+    previous = edges[0][0] if edges else 0
+    for moment, change in edges:
+        if running > 1:
+            concurrent += moment - previous
+        running += change
+        previous = moment
     tasks = {c["task_id"]: c["tier"] for c in work}
     local = sum(tier != "cloud" for tier in tasks.values())
-    return local, len(tasks) - local, overlap
+    return local, len(tasks) - local, concurrent
 
 
 def check_expectations(case: TestCase, result: "CaseResult") -> list[str]:
@@ -148,7 +151,7 @@ def check_expectations(case: TestCase, result: "CaseResult") -> list[str]:
     if most is not None and result.cloud_subtasks > most:
         unmet.append(f"kept {result.cloud_subtasks} subtasks on the cloud, expected at most {most}")
     if expects.get("parallel_work") and result.parallel_ms <= 0:
-        unmet.append("local and cloud subtasks never ran at the same time")
+        unmet.append("no two subtasks ever ran at the same time")
     return unmet
 
 

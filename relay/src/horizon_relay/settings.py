@@ -43,15 +43,17 @@ class Endpoint:
 class RelaySettings:
     local: Endpoint  # the smallest model: triage and easy subtasks
     cloud: Endpoint  # the large model: planning, synthesis, last-resort subtasks
-    limits: Limits = Limits(call_timeout=120, run_timeout=480)
+    # Local models writing code or long drafts are slow, and a delegated plan runs several of them.
+    limits: Limits = Limits(call_timeout=180, run_timeout=900)
     mid: Endpoint | None = None  # optional middle tier between local and cloud
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "RelaySettings":
         """LOCAL_BASE_URL, LOCAL_MODEL, LOCAL_API_KEY, CLOUD_BASE_URL, CLOUD_MODEL, CLOUD_API_KEY, CLOUD_ENABLED,
         optionally MID_BASE_URL, MID_MODEL, MID_API_KEY for a middle tier, and LOCAL_LOCATION, MID_LOCATION,
-        CLOUD_LOCATION to name where each model runs instead of detecting it, and RELAY_REASONING_EFFORT
-        (per model: LOCAL_/MID_/CLOUD_REASONING_EFFORT) for how much the models think before answering."""
+        CLOUD_LOCATION to name where each model runs instead of detecting it, RELAY_REASONING_EFFORT
+        (per model: LOCAL_/MID_/CLOUD_REASONING_EFFORT) for how much the models think before answering, and
+        RELAY_CALL_TIMEOUT / RELAY_RUN_TIMEOUT in seconds."""
         env = os.environ if env is None else env
         effort = env.get("RELAY_REASONING_EFFORT", "low")
         mid = None
@@ -67,7 +69,8 @@ class RelaySettings:
                      env.get("CLOUD_MODEL", "IFM/K2-Horizon-375B-A23B"),
                      env.get("CLOUD_API_KEY", ""), env.get("CLOUD_LOCATION", ""),
                      env.get("CLOUD_REASONING_EFFORT", "")),
-            Limits(call_timeout=120, run_timeout=480,
+            Limits(call_timeout=float(env.get("RELAY_CALL_TIMEOUT", 180)),
+                   run_timeout=float(env.get("RELAY_RUN_TIMEOUT", 900)),
                    cloud_enabled=env.get("CLOUD_ENABLED", "true").lower() == "true"),
             mid,
         )

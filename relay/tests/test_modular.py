@@ -148,6 +148,39 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, ["solve", "answer"])  # no plan, no subtasks, one cloud call
         self.assertEqual(result.metrics["cloud_calls"], 1)
 
+    async def test_big_goals_must_spread_the_bulk_across_local_models(self):
+        """A plan that keeps everything in one task is sent back to the planner with the reason."""
+        goal = ("Design the data model, implement add_book, find_by_author and checkout, list the error cases and "
+                "explain how the pieces fit together for a library catalogue module.")
+        plans = []
+        def task(task_id, tier, depends=()):
+            return {"id": task_id, "instruction": "do it", "preferred_tier": tier, "why": "w",
+                    "input_refs": ["sources.conversation"] if not depends else [f"results.{depends[0]}"],
+                    "depends_on": list(depends), "result_type": "task_answer", "checks": ["required_fields"]}
+
+        class Planner(SimulatedProvider):
+            models = {"local": "small", "mid": "medium", "cloud": "large"}
+
+            async def complete(self, tier, operation, payload):
+                if operation == "plan":
+                    plans.append(payload.get("validation_error"))
+                    tasks = ([task("do_everything", "cloud"), task("check_it", "local", ("do_everything",))]
+                             if len(plans) == 1 else
+                             [task("design", "cloud"), task("write_add_book", "local"), task("write_checkout", "mid"),
+                              task("list_errors", "local")])
+                    return Reply({"version": 2, "tasks": tasks, "final_instruction": "Integrate"}, "large")
+                if operation == "work":
+                    return Reply({"answer": f'{payload["task"]["id"]} done'}, tier)
+                if operation == "synthesize":
+                    return Reply("Integrated", "large")
+                return await super().complete(tier, operation, payload)
+
+        result = await Relay(Planner()).chat([{"role": "user", "content": goal}])
+        self.assertEqual(len(plans), 2)  # the first plan was rejected and re-planned
+        self.assertIn("at least 2 local subtasks", plans[1])
+        delegated = [c["tier"] for c in result.metrics["calls"] if c["operation"] == "work"]
+        self.assertEqual(sorted(delegated), ["cloud", "local", "local", "mid"])
+
     async def test_direct_cloud_mode(self):
         calls = []
         class Recorder(SimulatedProvider):

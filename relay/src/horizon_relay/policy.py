@@ -151,7 +151,8 @@ MEDIUM_MARKERS = ("compare", "explain why", "analyze", "reason", "tradeoff", "pl
 # Things a request can ask for. Several of them means the work can be split up and handed out.
 DELIVERABLES = ("compare", "list", "summar", "extract", "suggest", "recommend", "identif", "outline", "draft",
                 "plan", "write", "propose", "describe", "explain", "evaluate", "analy", "estimate", "calculate",
-                "determine", "derive", "prove", "design", "classif", "rewrite", "translate", "review")
+                "determine", "derive", "prove", "design", "classif", "rewrite", "translate", "review",
+                "implement", "build", "create", "generate", "define", "document", "test ")
 
 
 def task_complexity(text: str) -> float:
@@ -247,6 +248,8 @@ class RoutingPolicy:
     cloud_mode: str = "auto"  # "auto": plan only when it pays off (see plans); "plan"/"direct" force one way
     plan_min_parts: int = 2  # separable things the request must ask for before the cloud splits it up
     plan_min_chars: int = 120  # and how long it must be: splitting a one-liner costs more than it saves
+    bulk_parts: int = 4  # a goal asking for this many things must have its bulk spread across local models
+    min_parallel_local: int = 2  # how many independent local subtasks such a plan needs
     # Plan mode only:
     local_worker_attempts: int = 2  # tries on the assigned local model before a subtask fails or escalates
     escalate_failed_local_tasks: bool = True  # then one try on each larger tier, for that subtask only
@@ -315,6 +318,19 @@ class RoutingPolicy:
         if self.cloud_mode != "auto":
             return self.cloud_mode == "plan"
         return request_parts(text) >= self.plan_min_parts and len(text) >= self.plan_min_chars
+
+    def check_plan(self, plan, text: str) -> str | None:
+        """Why this plan wastes the local models, or None if it uses them. Big goals must not come back as one
+        task that does everything: the planner is asked again with this as the reason."""
+        if request_parts(text) < self.bulk_parts:
+            return None
+        independent = [t for t in plan.tasks if t.preferred_tier != "cloud" and not t.depends_on]
+        if len(independent) >= self.min_parallel_local:
+            return None
+        return (f"The goal asks for several things, so it must not come back as one task that produces everything. "
+                f"Plan at least {self.min_parallel_local} local subtasks with empty depends_on, each producing one "
+                f"named piece of the deliverable (one function or group of functions, one section, one list), and "
+                f"keep the cloud task to the single hardest piece so the local models work while it does.")
 
     def threshold(self, tier: str) -> float:
         return self.tier_thresholds.get(tier, self.escalation_threshold)
