@@ -57,14 +57,16 @@ class RelayEngine:
         self.policy = policy or RoutingPolicy()
 
     async def run(self, goal: str, sources: dict[str, str], *, local_extract: bool = False,
-                  emit: EventCallback | None = None) -> RunResult:
+                  emit: EventCallback | None = None, on_delta=None) -> RunResult:
+        """`emit` receives progress events; `on_delta(call, text)` receives each chunk a model writes, where
+        call describes the step (tier, operation, task_id, attempt)."""
         if not isinstance(goal, str) or not 1 <= len(goal) <= 8000:
             raise RelayError("Goal must be text of at most 8000 characters")
         if (not isinstance(sources, dict) or not sources or len(sources) > self.limits.max_tasks
                 or any(not isinstance(k, str) or not isinstance(v, str) or not v for k, v in sources.items())
                 or sum(len(v) for v in sources.values()) > 32000):
             raise RelayError("Sources must be nonempty text within the prototype's 32000-character limit")
-        run = _Run(self.provider, self.limits, self.policy, emit)
+        run = _Run(self.provider, self.limits, self.policy, emit, on_delta)
         try:
             async with asyncio.timeout(self.limits.run_timeout):
                 locations = await _locations(self.provider)
@@ -91,8 +93,9 @@ class RelayEngine:
 class _Run:
     """State for one request. Nothing is shared between runs."""
 
-    def __init__(self, provider, limits, policy, emit):
+    def __init__(self, provider, limits, policy, emit, on_delta=None):
         self.provider, self.limits, self.policy, self.emit = provider, limits, policy, emit
+        self.on_delta = on_delta
         self.id, self.seq = uuid4().hex, 0
         self.started = time.monotonic()
         self.calls, self.results = [], {}
@@ -300,9 +303,16 @@ class _Run:
         watcher = None
         try:
             async with asyncio.timeout(self.limits.call_timeout):
-                if self.emit and getattr(self.provider, "streams", False):
-                    watcher = asyncio.create_task(self.follow(record, live))
-                    reply = await self.provider.complete(tier, operation, payload, on_delta=lambda text: live.update(text=live["text"] + text))
+                if (self.emit or self.on_delta) and getattr(self.provider, "streams", False):
+                    def deliver(text):
+                        live["text"] += text
+                        if self.on_delta:
+                            self.on_delta({"tier": tier, "operation": operation, "task_id": record["task_id"],
+                                           "attempt": record["attempt"], "for_tier": record["for_tier"],
+                                           "model": self.models.get(tier, tier)}, text)
+                    if self.emit:
+                        watcher = asyncio.create_task(self.follow(record, live))
+                    reply = await self.provider.complete(tier, operation, payload, on_delta=deliver)
                 else:
                     reply = await self.provider.complete(tier, operation, payload)
             if not isinstance(reply, Reply) or not reply.model:

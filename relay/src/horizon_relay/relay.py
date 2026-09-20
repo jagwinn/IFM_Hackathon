@@ -43,15 +43,17 @@ class Relay:
         """The same models and limits with some routing settings changed, e.g. with_policy(cloud_mode="direct")."""
         return Relay(self.provider, limits=self.engine.limits, policy=replace(self.engine.policy, **overrides))
 
-    async def chat(self, messages: list[dict], *, emit: EventCallback | None = None) -> RunResult:
+    async def chat(self, messages: list[dict], *, emit: EventCallback | None = None, on_delta=None) -> RunResult:
         """Answer the latest user message of an OpenAI-style conversation."""
         request = to_request(messages)
-        return await self.run(request.goal, request.sources, local_extract=request.local_extract, emit=emit)
+        return await self.run(request.goal, request.sources, local_extract=request.local_extract, emit=emit,
+                              on_delta=on_delta)
 
     async def run(self, goal: str, sources: dict[str, str], *, local_extract: bool = False,
-                  emit: EventCallback | None = None) -> RunResult:
-        """Answer `goal` using only the named text `sources`."""
-        return await self.engine.run(goal, sources, local_extract=local_extract, emit=emit)
+                  emit: EventCallback | None = None, on_delta=None) -> RunResult:
+        """Answer `goal` using only the named text `sources`. `on_delta(call, text)` sees every chunk a model
+        writes, for front ends that stream the text as it appears."""
+        return await self.engine.run(goal, sources, local_extract=local_extract, emit=emit, on_delta=on_delta)
 
     async def complete(self, messages: list[dict], *, timeout: float = 120) -> str:
         """One direct call to the local model, without planning. For side requests such as chat titles."""

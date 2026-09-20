@@ -7,6 +7,7 @@ description: Local Horizon models answer and are scored; the cloud plans only wh
 
 # Open WebUI adapter only: request/response translation and progress display. Routing lives in horizon_relay.
 
+import asyncio
 import json
 import os
 import re
@@ -125,6 +126,63 @@ def short_model(name: str) -> str:
     return match.group(1) if match else name
 
 
+def step_heading(call: dict, models: dict) -> str:
+    """Names the step whose text is streaming, e.g. "K2-Horizon-0.9B · answer 2"."""
+    model = short_model(call.get("model") or models.get(call["tier"], call["tier"]))
+    step = {"solve": f'answer {call.get("attempt") or 1}', "critique": "checking the answer", "plan": "planning",
+            "attempt": "exact extraction", "work": f'subtask {call.get("task_id")}',
+            "synthesize": "writing the answer", "answer": "answering"}.get(call["operation"], call["operation"])
+    return f"{model} · {step}"
+
+
+async def stream_relay(relay, messages, emit):
+    """Stream a live relay run: everything the models write while working goes inside a <think> block, which
+    Open WebUI shows as a collapsible Thinking section, then the final answer streams as the message itself."""
+    queue: asyncio.Queue = asyncio.Queue()
+    models = dict(getattr(relay.provider, "models", {}) or {})
+
+    async def run():
+        try:
+            queue.put_nowait(("done", None, await relay.chat(messages, emit=emit, on_delta=
+                                                             lambda call, text: queue.put_nowait(("delta", call, text)))))
+        except RelayError as exc:
+            queue.put_nowait(("error", None, str(exc)))
+        except Exception:
+            queue.put_nowait(("error", None, "The relay stopped unexpectedly."))
+
+    task = asyncio.create_task(run())
+    thinking = answered = False
+    heading = None
+    try:
+        while True:
+            kind, call, payload = await queue.get()
+            if kind == "delta":
+                final = call["operation"] in ("synthesize", "answer")
+                if final:
+                    if thinking:
+                        yield "</think>\n\n"
+                        thinking = False
+                    answered = True
+                else:
+                    if not thinking:
+                        yield "<think>"
+                        thinking = True
+                    if step_heading(call, models) != heading:
+                        heading = step_heading(call, models)
+                        yield f"\n\n**{heading}**\n"
+                yield payload
+            elif kind == "error":
+                yield ("</think>\n\n" if thinking else "") + f"**Relay stopped — no complete answer.** {payload}"
+                return
+            else:
+                if thinking:
+                    yield "</think>\n\n"
+                yield ("" if answered else payload.content) + "\n\n---\n" + payload.summary()
+                return
+    finally:
+        task.cancel()
+
+
 def demo_background_reply(task) -> str:
     """Canned title/tag/follow-up replies so the demo never spends a model call on them."""
     task = str(task)
@@ -165,6 +223,8 @@ class Pipe:
                 relay = Relay.from_env()
                 if __task__ is not None:  # title, tags, follow-ups: one local call, no plan, no cloud
                     return await relay.complete(body.get("messages", []))
+                if getattr(relay.provider, "streams", False):
+                    return stream_relay(relay, body.get("messages", []), emit)
                 result = await relay.chat(body.get("messages", []), emit=emit)
                 return result.content + "\n\n---\n" + result.summary()
             return await self.demo(body, __task__, emit)

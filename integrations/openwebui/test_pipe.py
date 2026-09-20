@@ -1,7 +1,8 @@
+import json
 import unittest
 from unittest.mock import patch
 
-from horizon_relay import Relay, SimulatedProvider
+from horizon_relay import Relay, RelayError, SimulatedProvider
 
 import horizon_relay_pipe as pipe_module
 
@@ -73,6 +74,52 @@ class PipeTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(events[-1]["data"]["done"])
             stopped = await pipe_module.Pipe().pipe({"model": "horizon_relay.live", "messages": []})
             self.assertIn("Relay stopped", stopped)
+
+
+class StreamingProvider(SimulatedProvider):
+    """A scripted provider that writes its replies chunk by chunk, like a real model."""
+    streams = True
+
+    async def complete(self, tier, operation, payload, on_delta=None):
+        reply = await super().complete(tier, operation, payload)
+        if on_delta:
+            text = reply.value if isinstance(reply.value, str) else json.dumps(reply.value)
+            for i in range(0, len(text), 20):
+                on_delta(text[i:i + 20])
+        return reply
+
+
+class StreamingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_live_answer_streams_with_thinking_first(self):
+        with patch.dict("os.environ", {"RELAY_PROVIDER": "live"}), \
+                patch.object(pipe_module.Relay, "from_env", return_value=Relay(StreamingProvider())):
+            stream = await pipe_module.Pipe().pipe(
+                {"model": "horizon_relay.live", "messages": [{"role": "user", "content": "Prioritize the reports"}]})
+            chunks = [c async for c in stream]
+        text = "".join(chunks)
+        self.assertGreater(len(chunks), 10)  # streamed, not one block
+        self.assertTrue(text.startswith("<think>"))
+        self.assertIn("simulated-horizon-local · answer 1", text)
+        self.assertIn("· subtask extract_conversation", text)
+        self.assertEqual(text.count("<think>"), 1)
+        thinking, answer = text.split("</think>", 1)
+        self.assertIn("Engineering plan", answer)  # the answer streams outside the thinking block
+        self.assertNotIn("Engineering plan", thinking)
+        self.assertIn("---\nRelay:", answer)
+
+    async def test_stream_reports_a_stopped_run(self):
+        class Failing(StreamingProvider):
+            async def complete(self, tier, operation, payload, on_delta=None):
+                if tier == "cloud":
+                    raise RelayError("Cloud response was empty or reached its token limit")
+                return await super().complete(tier, operation, payload, on_delta)
+        with patch.dict("os.environ", {"RELAY_PROVIDER": "live"}), \
+                patch.object(pipe_module.Relay, "from_env", return_value=Relay(Failing())):
+            stream = await pipe_module.Pipe().pipe(
+                {"model": "horizon_relay.live", "messages": [{"role": "user", "content": "Prioritize"}]})
+            text = "".join([c async for c in stream])
+        self.assertIn("</think>", text)
+        self.assertIn("Relay stopped", text)
 
 
 class FakeChats:

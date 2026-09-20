@@ -118,6 +118,11 @@ has written so far (about every 1.5 s), and each finished call records what the 
 wrote. The decision graph shows the live text on the running step and keeps both as collapsible sections, so the
 thinking is visible without being mistaken for the answer. The Open WebUI status line follows the same events.
 
+Front ends can also stream the text itself: `relay.chat(messages, on_delta=...)` calls back with every chunk a
+model writes, along with which step wrote it. The Open WebUI Pipe returns an async generator built on that, so
+the work streams word by word inside a `<think>` block (Open WebUI renders it as a live Thinking section) and the
+final answer streams as the message.
+
 How much the models think before answering is set by `RELAY_REASONING_EFFORT` (default `low`, so there is little
 thinking to show), or per model with `LOCAL_REASONING_EFFORT`, `MID_REASONING_EFFORT` and `CLOUD_REASONING_EFFORT`.
 
