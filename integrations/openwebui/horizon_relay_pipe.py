@@ -20,7 +20,7 @@ from horizon_relay.evaluation import load_cases, run_case, select_cases, summari
 from horizon_relay.graph import RunGraph, render_html
 
 # Events that change what the decision graph shows. Each one re-sends the graph embed.
-GRAPH_UPDATES = {"call_output", "local_skipped", "local_solve", "local_sample", "local_critique", "local_verdict", "extract_failed", "escalated",
+GRAPH_UPDATES = {"local_skipped", "local_solve", "local_sample", "local_critique", "local_verdict", "extract_failed", "escalated",
                  "local_accepted", "answering", "plan_invalid", "plan_created", "task_started", "task_escalated",
                  "task_invalid", "task_completed", "synthesizing"}
 
@@ -137,7 +137,10 @@ def step_heading(call: dict, models: dict) -> str:
 
 async def stream_relay(relay, messages, emit):
     """Stream a live relay run: everything the models write while working goes inside a <think> block, which
-    Open WebUI shows as a collapsible Thinking section, then the final answer streams as the message itself."""
+    Open WebUI shows as a collapsible Thinking section, then the final answer streams as the message itself.
+
+    Inside that block each step gets one heading; the model's reasoning is written as prose and the JSON it
+    produces goes in a fenced block, so neither is mangled by Markdown."""
     queue: asyncio.Queue = asyncio.Queue()
     models = dict(getattr(relay.provider, "models", {}) or {})
 
@@ -151,33 +154,57 @@ async def stream_relay(relay, messages, emit):
             queue.put_nowait(("error", None, "The relay stopped unexpectedly."))
 
     task = asyncio.create_task(run())
-    thinking = answered = False
-    heading = None
+    state = {"thinking": False, "answered": False, "heading": None, "fenced": False, "fresh": False}
+
+    def open_step(call):
+        """Heading and fence changes needed before this chunk, as text to yield."""
+        out = ""
+        heading = step_heading(call, models)
+        if heading != state["heading"]:
+            out += close_fence()
+            out += ("\n\n" if state["heading"] else "") + f"**{heading}**\n"
+            state["heading"] = heading
+        wants_fence = call.get("kind") != "thinking"
+        if wants_fence and not state["fenced"]:
+            out += "```json\n"
+            state["fenced"] = state["fresh"] = True  # fresh: trim the blank lines a model writes before its JSON
+        elif not wants_fence and state["fenced"]:
+            out += close_fence()
+        return out
+
+    def close_fence():
+        if not state["fenced"]:
+            return ""
+        state["fenced"] = False
+        return "\n```\n"
+
+    def close_thinking():
+        if not state["thinking"]:
+            return ""
+        state["thinking"] = False
+        return close_fence() + "</think>\n\n"
+
     try:
         while True:
             kind, call, payload = await queue.get()
             if kind == "delta":
-                final = call["operation"] in ("synthesize", "answer")
-                if final:
-                    if thinking:
-                        yield "</think>\n\n"
-                        thinking = False
-                    answered = True
-                else:
-                    if not thinking:
-                        yield "<think>"
-                        thinking = True
-                    if step_heading(call, models) != heading:
-                        heading = step_heading(call, models)
-                        yield f"\n\n**{heading}**\n"
-                yield payload
+                if call["operation"] in ("synthesize", "answer") and call.get("kind") != "thinking":
+                    state["answered"] = True
+                    yield close_thinking() + payload
+                    continue
+                if not state["thinking"]:
+                    state["thinking"] = True
+                    yield "<think>"
+                opener = open_step(call)
+                if state.get("fresh"):
+                    payload = payload.lstrip("\n")
+                    state["fresh"] = not payload.strip()
+                yield opener + payload
             elif kind == "error":
-                yield ("</think>\n\n" if thinking else "") + f"**Relay stopped — no complete answer.** {payload}"
+                yield close_thinking() + f"**Relay stopped — no complete answer.** {payload}"
                 return
             else:
-                if thinking:
-                    yield "</think>\n\n"
-                yield ("" if answered else payload.content) + "\n\n---\n" + payload.summary()
+                yield close_thinking() + ("" if state["answered"] else payload.content) + "\n\n---\n" + payload.summary()
                 return
     finally:
         task.cancel()

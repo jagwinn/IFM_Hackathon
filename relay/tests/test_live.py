@@ -90,9 +90,14 @@ class LiveTests(unittest.IsolatedAsyncioTestCase):
         def handler(request):
             seen.append(json.loads(request.content))
             return httpx.Response(200, content=body.encode(), headers={"content-type": "text/event-stream"})
-        reply = await self.provider(handler).complete("local", "solve", {"task": "city?"}, on_delta=live.append)
+        reply = await self.provider(handler).complete("local", "solve", {"task": "city?"},
+                                                      on_delta=lambda text, kind: live.append((kind, text)))
         self.assertTrue(seen[0]["stream"])
-        self.assertEqual(len(live), 4)  # every chunk is reported as it arrives
+        self.assertEqual(len(live), 3)  # every chunk is reported as it arrives; the marker chunk carries no text
+        self.assertEqual(live[0], ("thinking", "Let me check the sentence. "))  # before the marker
+        self.assertEqual(live[-1][0], "output")  # after it
+        self.assertFalse(any("</ifm|think" in text for _, text in live))  # the marker itself is not shown
+        self.assertTrue(seen[0]["stream_options"]["include_usage"])
         self.assertEqual(reply.thinking, "Let me check the sentence.")
         self.assertEqual(reply.text, '{"answer": "Detroit", "confidence": 0.9}')
         self.assertEqual(reply.value, {"answer": "Detroit", "confidence": 0.9})
@@ -115,7 +120,7 @@ class LiveTests(unittest.IsolatedAsyncioTestCase):
         body = 'data: {"choices": [{"delta": {"content": "partial"}, "finish_reason": "length"}]}\n\ndata: [DONE]\n\n'
         provider = self.provider(lambda r: httpx.Response(200, content=body.encode()))
         with self.assertRaisesRegex(RelayError, "token limit"):
-            await provider.complete("local", "solve", {"task": "x"}, on_delta=lambda _: None)
+            await provider.complete("local", "solve", {"task": "x"}, on_delta=lambda *args: None)
 
     async def test_truncation_is_not_a_success(self):
         provider = self.provider(lambda r: httpx.Response(200, json={"choices": [{"message": {"content": "partial"}, "finish_reason": "length"}]}))

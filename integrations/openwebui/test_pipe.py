@@ -105,6 +105,8 @@ class StreamingTests(unittest.IsolatedAsyncioTestCase):
         thinking, answer = text.split("</think>", 1)
         self.assertIn("Engineering plan", answer)  # the answer streams outside the thinking block
         self.assertNotIn("Engineering plan", thinking)
+        self.assertNotIn("```", answer)  # fences are closed inside the thinking block
+        self.assertEqual(thinking.count("```json"), thinking.count("```") - thinking.count("```json"))
         self.assertIn("---\nRelay:", answer)
 
     async def test_stream_reports_a_stopped_run(self):

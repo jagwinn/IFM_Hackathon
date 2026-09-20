@@ -69,7 +69,8 @@ class OpenAICompatibleProvider:
                 for tier, endpoint in self.endpoints.items()}
 
     async def complete(self, tier, operation, payload, on_delta=None):
-        """on_delta(text) is called with each chunk the model produces, reasoning included."""
+        """on_delta(text, kind) is called with each chunk the model produces: kind is "thinking" while the
+        model reasons and "output" once it writes the answer."""
         if tier not in self.endpoints:
             raise RelayError(f"No {tier} model is configured")
         endpoint = self.endpoints[tier]
@@ -79,6 +80,8 @@ class OpenAICompatibleProvider:
         request = {"model": endpoint.model, "messages": prompts.messages(operation, payload),
                    "max_tokens": _max_tokens(tier, operation),
                    "temperature": payload.get("temperature", 0.2), "stream": bool(on_delta)}
+        if on_delta:  # without this, streamed replies report no token counts
+            request["stream_options"] = {"include_usage": True}
         if endpoint.reasoning_effort:
             request["chat_template_kwargs"] = {"reasoning_effort": endpoint.reasoning_effort}
         if tier != "cloud":
@@ -146,6 +149,8 @@ def _read_response(response, tier) -> tuple[str, str, list | None, str | None, d
 async def _read_stream(client, url, request, headers, tier, on_delta) -> tuple[str, str, list | None, str | None, dict]:
     """Server-sent chunks, passed to on_delta as they arrive and assembled into the same five parts."""
     content, reasoning, tokens, finish, usage = "", "", [], None, {}
+    # K2 writes its reasoning inline and ends it with a tokenizer marker; before that marker the text is thinking.
+    marker, thinking = re.compile(r"</ifm\|think(?:_[a-z]+)?>"), True
     async with client.stream("POST", url, json=request, headers=headers) as response:
         if response.status_code != 200:
             await response.aread()
@@ -166,13 +171,27 @@ async def _read_stream(client, url, request, headers, tier, on_delta) -> tuple[s
                 delta = choice.get("delta") or {}
                 finish = choice.get("finish_reason") or finish
                 tokens.extend((choice.get("logprobs") or {}).get("content") or [])
-                for key, text in (("reasoning_content", delta.get("reasoning_content")), ("content", delta.get("content"))):
-                    if isinstance(text, str) and text:
-                        if key == "content":
-                            content += text
-                        else:
-                            reasoning += text
-                        on_delta(text)
+                reasoning_delta = delta.get("reasoning_content")
+                if isinstance(reasoning_delta, str) and reasoning_delta:
+                    reasoning += reasoning_delta
+                    on_delta(reasoning_delta, "thinking")
+                text = delta.get("content")
+                if isinstance(text, str) and text:
+                    content += text
+                    if not thinking:
+                        on_delta(text, "output")
+                        continue
+                    match = marker.search(content)
+                    if not match:
+                        on_delta(text, "thinking")
+                    else:  # the marker may arrive mid-chunk: split this chunk, dropping the marker itself
+                        thinking = False
+                        tail = content[match.end():]
+                        head = text[:max(0, len(text) - len(tail) - len(match.group(0)))]
+                        if head.strip():
+                            on_delta(head, "thinking")
+                        if tail:
+                            on_delta(tail, "output")
     return content, reasoning, _token_logprobs({"logprobs": {"content": tokens}}), finish, usage
 
 

@@ -304,12 +304,12 @@ class _Run:
         try:
             async with asyncio.timeout(self.limits.call_timeout):
                 if (self.emit or self.on_delta) and getattr(self.provider, "streams", False):
-                    def deliver(text):
+                    def deliver(text, kind="output"):
                         live["text"] += text
                         if self.on_delta:
                             self.on_delta({"tier": tier, "operation": operation, "task_id": record["task_id"],
                                            "attempt": record["attempt"], "for_tier": record["for_tier"],
-                                           "model": self.models.get(tier, tier)}, text)
+                                           "model": self.models.get(tier, tier), "kind": kind}, text)
                     if self.emit:
                         watcher = asyncio.create_task(self.follow(record, live))
                     reply = await self.provider.complete(tier, operation, payload, on_delta=deliver)

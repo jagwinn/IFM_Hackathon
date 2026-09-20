@@ -95,7 +95,8 @@ svg.edges { position: absolute; inset: 0; overflow: visible; pointer-events: non
 .rg.hovering .edge:not(.lit), .rg.hovering .elabel:not(.lit) { opacity: .15; }
 .rg.hovering .node:not(.lit) { opacity: .45; }
 
-.detail { border-top: 1px solid var(--line); padding: 14px; display: grid; gap: 12px; }
+/* A steady height keeps the message from jumping while the graph is republished during a run. */
+.detail { border-top: 1px solid var(--line); padding: 14px; display: grid; gap: 12px; align-content: start; min-height: 330px; }
 .dhead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .dhead h3 { margin: 0; font-size: 15px; }
 .pill { font-size: 11.5px; border-radius: 999px; padding: 0 8px; border: 1px solid var(--line); }
@@ -539,8 +540,14 @@ details.think[open] summary { margin-bottom: 5px; }
   }
 
   // Hosts such as Open WebUI size an embedded frame from this message.
+  let reportedHeight = 0;
   function reportHeight() {
-    const height = Math.ceil(document.documentElement.getBoundingClientRect().height);
+    // Round up, and never shrink while a run is in progress: small changes between updates would
+    // otherwise resize the message under the reader.
+    const measured = Math.ceil(document.documentElement.getBoundingClientRect().height / 8) * 8;
+    const height = G.status === "running" ? Math.max(measured, reportedHeight) : measured;
+    if (height === reportedHeight) return;
+    reportedHeight = height;
     try { parent.postMessage({ type: "iframe:height", height }, "*"); } catch {}
   }
   if (window.ResizeObserver) new ResizeObserver(reportHeight).observe(document.body);
